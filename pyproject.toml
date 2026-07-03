@@ -1,0 +1,31 @@
+[project]
+name = "reelfit"
+version = "0.1.0"
+description = "Festival fit-scoring & distribution guidance platform (Phase 1 structured monolith)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "email-validator>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
