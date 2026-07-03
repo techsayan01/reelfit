@@ -13,6 +13,7 @@ import Submit from "./pages/Submit.jsx";
 import Credits from "./pages/Credits.jsx";
 import ReviewNew from "./pages/ReviewNew.jsx";
 import FestivalDashboard from "./pages/FestivalDashboard.jsx";
+import FestivalSubmissionDetail from "./pages/FestivalSubmissionDetail.jsx";
 
 function Protected({ kind, children }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="/credits" element={<Protected kind="filmmaker"><Credits /></Protected>} />
         <Route path="/reviews/new" element={<Protected kind="filmmaker"><ReviewNew /></Protected>} />
         <Route path="/festival/dashboard" element={<Protected kind="organizer"><FestivalDashboard /></Protected>} />
+        <Route path="/festival/submissions/:id" element={<Protected kind="organizer"><FestivalSubmissionDetail /></Protected>} />
         <Route path="*" element={<p className="center-note">Page not found.</p>} />
       </Routes>
     </Layout>

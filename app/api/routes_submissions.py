@@ -22,6 +22,7 @@ class SubmissionIn(BaseModel):
     festival_id: int
     category_id: int
     discount_code: str = ""
+    cover_letter: str = ""
 
 
 def own_submission(db, user, submission_id: int):
@@ -117,6 +118,7 @@ def create_submission(db: DbDep, user: FilmmakerDep, body: SubmissionIn):
             festival_id=body.festival_id,
             category_id=body.category_id,
             discount_code=body.discount_code,
+            cover_letter=body.cover_letter,
         )
     except SubmissionError as exc:
         raise HTTPException(400, str(exc))

@@ -9,6 +9,7 @@ from app.modules.accounts.models import FestivalMembership, OrgRole
 from app.modules.certificates import service as certificates
 from app.modules.dashboards import service as dashboards
 from app.modules.festivals import service as festivals
+from app.modules.jury import service as jury
 from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.reviews import service as reviews
@@ -27,6 +28,10 @@ class StatusIn(BaseModel):
 
 class ReplyIn(BaseModel):
     reply_text: str
+
+
+class NoteIn(BaseModel):
+    text: str
 
 
 class ProfileIn(BaseModel):
@@ -133,19 +138,117 @@ def update_profile(db: DbDep, user: OrganizerDep, body: ProfileIn):
     return {"festival": {**festival_payload(festival), "rules": festival.rules}}
 
 
+def _own_submission(db, membership, submission_id: int):
+    sub = submissions.get_submission(db, submission_id)
+    if sub is None or sub.festival_id != membership.festival_id:
+        raise HTTPException(404, "Submission not found")
+    return sub
+
+
+@router.get("/submissions/{submission_id}")
+def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
+    """Everything a programmer needs to judge one entry. The filmmaker's
+    public profile is shown; direct contact stays behind the masked relay."""
+    membership = _membership(db, user)
+    sub = _own_submission(db, membership, submission_id)
+    film = accounts.get_film(db, sub.film_id)
+    filmmaker = accounts.get_user(db, film.filmmaker_id)
+    festival = festivals.get_festival(db, membership.festival_id)
+    categories = {
+        c.id: c.name
+        for e in festival.editions
+        for c in festivals.categories_for_edition(db, e.id)
+    }
+
+    # Prev/next within this festival's submissions, newest first.
+    subs = submissions.submissions_for_festival(db, membership.festival_id)
+    ids = [s.id for s in subs]
+    idx = ids.index(sub.id)
+    prev_id = ids[idx - 1] if idx > 0 else None
+    next_id = ids[idx + 1] if idx < len(ids) - 1 else None
+
+    def actor_name(user_id):
+        if user_id is None:
+            return "system"
+        actor = accounts.get_user(db, user_id)
+        return actor.display_name if actor else "unknown"
+
+    return {
+        "submission": {
+            "id": sub.id,
+            "tracking_number": sub.tracking_number,
+            "status": sub.status.value,
+            "notified": sub.status != SubmissionStatus.RECEIVED,
+            "category": categories.get(sub.category_id, ""),
+            "fee_paid_cents": sub.fee_paid_cents,
+            "discount_code": sub.discount_code,
+            "cover_letter": sub.cover_letter,
+            "contact": "access revoked" if sub.relay_revoked else sub.relay_contact_id,
+            "created_at": sub.created_at.isoformat(),
+        },
+        "film": {
+            "title": film.title,
+            "kind": film.kind.value,
+            "genre": film.genre,
+            "runtime_minutes": film.runtime_minutes,
+            "year": film.year,
+            "country": film.country,
+            "language": film.language,
+            "logline": film.logline,
+            "synopsis": film.synopsis,
+            "credits": film.credits,
+            "screener_url": film.screener_url,
+            "trailer_url": film.trailer_url,
+            "first_time_filmmaker": film.first_time_filmmaker,
+            "student_project": film.student_project,
+        },
+        "filmmaker": {
+            "display_name": filmmaker.display_name,
+            "bio": filmmaker.bio,
+        },
+        "status_log": [
+            {
+                "actor": actor_name(c.actor_user_id),
+                "from_status": c.from_status,
+                "to_status": c.to_status,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in submissions.status_log(db, sub.id)
+        ],
+        "notes": [
+            {
+                "id": n.id,
+                "author": actor_name(n.author_user_id),
+                "text": n.text,
+                "created_at": n.created_at.isoformat(),
+            }
+            for n in jury.notes_for_submission(db, sub.id)
+        ],
+        "statuses": [s.value for s in SubmissionStatus],
+        "can_update": membership.role in STATUS_ROLES,
+        "prev_id": prev_id,
+        "next_id": next_id,
+    }
+
+
+@router.post("/submissions/{submission_id}/notes", status_code=201)
+def add_note(db: DbDep, user: OrganizerDep, submission_id: int, body: NoteIn):
+    """Internal jury note — never visible to the filmmaker (BRD §5.1.3)."""
+    membership = _membership(db, user)
+    _own_submission(db, membership, submission_id)
+    if not body.text.strip():
+        raise HTTPException(400, "Note can't be empty.")
+    note = jury.add_internal_note(db, submission_id, user.id, body.text.strip())
+    return {"note": {"id": note.id}}
+
+
 @router.post("/submissions/{submission_id}/status")
 def update_status(db: DbDep, user: OrganizerDep, submission_id: int, body: StatusIn):
     membership = _membership(db, user)
     if membership.role not in STATUS_ROLES:
         raise HTTPException(403, "Your role can't change judging status.")
-    sub = next(
-        (s for s in submissions.submissions_for_festival(db, membership.festival_id)
-         if s.id == submission_id),
-        None,
-    )
-    if sub is None:
-        raise HTTPException(404, "Submission not found")
-    submissions.update_status(db, submission_id, body.status)
+    sub = _own_submission(db, membership, submission_id)
+    submissions.update_status(db, submission_id, body.status, actor_user_id=user.id)
 
     film = accounts.get_film(db, sub.film_id)
     festival = festivals.get_festival(db, membership.festival_id)

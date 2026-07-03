@@ -83,6 +83,13 @@ def create_film(
     logline: str = "",
     country: str = "",
     kind: ProjectKind = ProjectKind.FILM,
+    synopsis: str = "",
+    language: str = "",
+    credits: str = "",
+    screener_url: str = "",
+    trailer_url: str = "",
+    first_time_filmmaker: bool = False,
+    student_project: bool = False,
 ) -> Film:
     if kind == ProjectKind.FILM and runtime_minutes is None:
         raise ValueError("Films need a runtime.")
@@ -95,6 +102,13 @@ def create_film(
         year=year,
         logline=logline.strip(),
         country=country.strip(),
+        synopsis=synopsis.strip(),
+        language=language.strip(),
+        credits=credits.strip(),
+        screener_url=screener_url.strip(),
+        trailer_url=trailer_url.strip(),
+        first_time_filmmaker=first_time_filmmaker,
+        student_project=student_project,
     )
     db.add(film)
     db.commit()

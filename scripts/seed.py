@@ -149,14 +149,40 @@ def seed() -> None:
         db, "priya@example.com", "reelfit-demo", "Priya Sharma", UserKind.FILMMAKER
     )
     priya.credit_balance = 3
+    priya.bio = (
+        "Priya Sharma is an independent documentary filmmaker from Kolkata. "
+        "Her short-form work focuses on the people who keep small towns "
+        "running. Monsoon Letters is her second film."
+    )
     monsoon = accounts.create_film(
         db, priya.id, "Monsoon Letters", "documentary", 24, today.year - 1,
         logline="Three postal workers keep a flooded town connected.",
-        country="India")
+        country="India",
+        synopsis=(
+            "When the monsoon cuts the town of Alipurduar off for six weeks "
+            "each year, its three postal workers become the only thread "
+            "between families. Shot over two flood seasons, Monsoon Letters "
+            "follows their routes by boat, bicycle and memory."
+        ),
+        language="Bengali (English subtitles)",
+        credits="Priya Sharma — Director\nArun Bose — Cinematographer\nMeera Iyer — Editor\nRahul Sen — Sound",
+        screener_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        first_time_filmmaker=False,
+        student_project=False,
+    )
     glass = accounts.create_film(
         db, priya.id, "Glass Houses", "drama", 96, today.year - 1,
         logline="A family reunion unravels over one weekend.",
-        country="India")
+        country="India",
+        synopsis=(
+            "Three siblings return to their childhood home to settle their "
+            "mother's estate. Over one monsoon weekend, the house gives up "
+            "its secrets one room at a time."
+        ),
+        language="Hindi (English subtitles)",
+        credits="Priya Sharma — Director\nVikram Rao — Producer\nSana Qureshi — Editor",
+        screener_url="https://vimeo.com/76979871",
+    )
     accounts.create_film(db, priya.id, "The Last Projectionist", "drama", None,
                          today.year, kind=ProjectKind.SCREENPLAY,
                          logline="A dying cinema's projectionist refuses to go digital.",
@@ -189,9 +215,14 @@ def seed() -> None:
             db, filmmaker_id=priya.id, film_id=film.id, film_kind=film.kind.value,
             film_runtime=film.runtime_minutes, film_year=film.year,
             film_title=film.title, festival_id=hillside.id, category_id=category.id,
+            cover_letter=(
+                f"Thank you for considering “{film.title}”. We'd love to "
+                "screen at Hillside — the festival's documentary focus is "
+                "exactly the audience this film was made for."
+            ),
         )
         if status != SubmissionStatus.RECEIVED:
-            submissions_svc.update_status(db, sub.id, status)
+            submissions_svc.update_status(db, sub.id, status, actor_user_id=organizer.id)
 
     print(f"Seeded {len(fests)} festivals and 2 demo accounts (password: reelfit-demo).")
 

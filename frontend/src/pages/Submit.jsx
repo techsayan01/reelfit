@@ -42,6 +42,7 @@ export default function Submit() {
           festival_id: Number(festivalId),
           category_id: Number(categoryId),
           discount_code: form.get("discount_code") || "",
+          cover_letter: form.get("cover_letter") || "",
         },
       });
       navigate("/dashboard");
@@ -88,6 +89,13 @@ export default function Submit() {
 
             <label htmlFor="discount_code">Promo code (optional)</label>
             <input id="discount_code" name="discount_code" placeholder="e.g. EARLYBIRD" />
+
+            <label htmlFor="cover_letter">Cover letter (optional)</label>
+            <textarea
+              id="cover_letter"
+              name="cover_letter"
+              placeholder="A short message to this festival's programmers."
+            />
 
             <div className="confirm-note">
               This is a paid submission. The fee shown for your chosen category

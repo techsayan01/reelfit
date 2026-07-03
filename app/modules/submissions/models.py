@@ -2,7 +2,7 @@ import enum
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -56,6 +56,22 @@ class Submission(Base):
     discount_code: Mapped[str] = mapped_column(String(60), default="")
     # Festival-facing reference number, e.g. HIL1001 (prefix + sequence).
     tracking_number: Mapped[str] = mapped_column(String(24), default="", index=True)
+    # Optional message from the filmmaker to this festival.
+    cover_letter: Mapped[str] = mapped_column(Text, default="")
     relay_contact_id: Mapped[str] = mapped_column(String(60), default=new_relay_id)
     relay_revoked: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StatusChange(Base):
+    """Audit log of judging-status changes — who moved a submission from
+    what to what, when. Part of judging transparency/consistency."""
+
+    __tablename__ = "submission_status_changes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    from_status: Mapped[str] = mapped_column(String(30))
+    to_status: Mapped[str] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

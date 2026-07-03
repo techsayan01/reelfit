@@ -30,6 +30,13 @@ export default function FilmNew() {
           year: Number(form.get("year")),
           country: form.get("country") || "",
           logline: form.get("logline") || "",
+          synopsis: form.get("synopsis") || "",
+          language: form.get("language") || "",
+          credits: form.get("credits") || "",
+          screener_url: form.get("screener_url") || "",
+          trailer_url: form.get("trailer_url") || "",
+          first_time_filmmaker: form.get("first_time_filmmaker") === "on",
+          student_project: form.get("student_project") === "on",
         },
       });
       navigate("/dashboard");
@@ -76,7 +83,36 @@ export default function FilmNew() {
           <input id="country" name="country" />
 
           <label htmlFor="logline">Logline (one sentence about your film)</label>
-          <textarea id="logline" name="logline" />
+          <textarea id="logline" name="logline" style={{ minHeight: 60 }} />
+
+          <label htmlFor="synopsis">Synopsis</label>
+          <textarea id="synopsis" name="synopsis" placeholder="A short paragraph festivals will read when judging." />
+
+          <label htmlFor="language">Language</label>
+          <input id="language" name="language" placeholder="e.g. Bengali (English subtitles)" />
+
+          {kind === "film" && (
+            <>
+              <label htmlFor="screener_url">Screener link (YouTube/Vimeo)</label>
+              <input id="screener_url" name="screener_url" type="url" placeholder="https://…" />
+              <p className="muted">Festivals watch your film through this link — use an unlisted upload.</p>
+
+              <label htmlFor="trailer_url">Trailer link (optional)</label>
+              <input id="trailer_url" name="trailer_url" type="url" placeholder="https://…" />
+            </>
+          )}
+
+          <label htmlFor="credits">Credits (one per line: Name — Role)</label>
+          <textarea id="credits" name="credits" placeholder={"Priya Sharma — Director\nArun Bose — Cinematographer"} />
+
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400 }}>
+            <input name="first_time_filmmaker" type="checkbox" style={{ width: "auto", minHeight: "auto" }} />
+            This is my first {kind === "film" ? "film" : "script"}
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400 }}>
+            <input name="student_project" type="checkbox" style={{ width: "auto", minHeight: "auto" }} />
+            Student project
+          </label>
 
           <div className="btn-row">
             <button className="btn btn-primary" type="submit" disabled={busy}>

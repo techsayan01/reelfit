@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, money } from "../api.js";
 import { useAuth } from "../AuthContext.jsx";
 import CalibrationTag from "../components/CalibrationTag.jsx";
@@ -183,7 +184,9 @@ function SubmissionsManager({ data, onStatusChange }) {
               {filtered.map((s) => (
                 <tr key={s.id}>
                   <td data-label="Project">
-                    <strong>{s.film_title}</strong>
+                    <Link to={`/festival/submissions/${s.id}`}>
+                      <strong>{s.film_title}</strong>
+                    </Link>
                     <br />
                     <span className="muted">
                       {s.film_kind === "screenplay" ? "screenplay · " : ""}

@@ -60,3 +60,13 @@ def add_internal_note(
     db.add(note)
     db.commit()
     return note
+
+
+def notes_for_submission(db: Session, submission_id: int) -> list[InternalNote]:
+    return list(
+        db.scalars(
+            select(InternalNote)
+            .where(InternalNote.submission_id == submission_id)
+            .order_by(InternalNote.created_at.desc())
+        )
+    )

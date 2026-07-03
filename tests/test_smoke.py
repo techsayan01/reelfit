@@ -295,6 +295,54 @@ def test_award_status_grants_certificate(client):
     assert "OFFICIAL SELECTION" in resp.text
 
 
+def test_submission_detail_with_log_and_notes(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    film_id = client.post("/api/films", json={
+        "title": "Detail Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+        "synopsis": "A film about details.",
+        "credits": "A Person — Director",
+        "screener_url": "https://www.youtube.com/watch?v=abc12345678",
+    }).json()["film"]["id"]
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "cover_letter": "Please consider us.",
+    }).json()["submission"]["id"]
+
+    client.post("/api/auth/register", json={
+        "email": "org3@example.com", "password": "password123",
+        "display_name": "Org Three", "kind": "organizer",
+    })
+    from app.db import SessionLocal
+    from app.modules.accounts.models import FestivalMembership, OrgRole
+    db = SessionLocal()
+    db.add(FestivalMembership(user_id=2, festival_id=1, role=OrgRole.OWNER))
+    db.commit()
+    db.close()
+
+    # Status change is logged with the actor
+    client.post(f"/api/festival/submissions/{sub_id}/status", json={"status": "shortlisted"})
+    # Internal note
+    resp = client.post(f"/api/festival/submissions/{sub_id}/notes", json={
+        "text": "Strong opening ten minutes.",
+    })
+    assert resp.status_code == 201
+
+    resp = client.get(f"/api/festival/submissions/{sub_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["film"]["synopsis"] == "A film about details."
+    assert data["submission"]["cover_letter"] == "Please consider us."
+    assert data["filmmaker"]["display_name"] == "Priya"
+    # Masked contact: relay handle, never an email
+    assert "@" not in data["submission"]["contact"]
+    assert data["status_log"][0]["actor"] == "Org Three"
+    assert data["status_log"][0]["to_status"] == "shortlisted"
+    assert data["notes"][0]["text"] == "Strong opening ten minutes."
+    assert data["prev_id"] is None and data["next_id"] is None
+
+
 def test_festival_dashboard_requires_organizer(client):
     _register_filmmaker(client)
     resp = client.get("/api/festival/dashboard")

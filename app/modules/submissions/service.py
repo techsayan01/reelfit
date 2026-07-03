@@ -13,7 +13,7 @@ from app.modules.festivals import service as festivals
 from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.payments import service as payments
-from app.modules.submissions.models import Submission, SubmissionStatus
+from app.modules.submissions.models import StatusChange, Submission, SubmissionStatus
 
 
 class SubmissionError(Exception):
@@ -32,6 +32,7 @@ def create_submission(
     festival_id: int,
     category_id: int,
     discount_code: str = "",
+    cover_letter: str = "",
 ) -> Submission:
     festival = festivals.get_festival(db, festival_id)
     if festival is None:
@@ -90,6 +91,7 @@ def create_submission(
         fee_paid_cents=fee,
         discount_code=applied_code,
         tracking_number=festivals.assign_tracking_number(db, festival_id),
+        cover_letter=cover_letter.strip(),
     )
     db.add(submission)
     db.flush()
@@ -130,13 +132,39 @@ def submissions_for_festival(db: Session, festival_id: int) -> list[Submission]:
     )
 
 
-def update_status(db: Session, submission_id: int, status: SubmissionStatus) -> Submission:
+def update_status(
+    db: Session,
+    submission_id: int,
+    status: SubmissionStatus,
+    actor_user_id: int | None = None,
+) -> Submission:
     submission = db.get(Submission, submission_id)
     if submission is None:
         raise SubmissionError("Submission not found.")
+    if submission.status != status:
+        db.add(StatusChange(
+            submission_id=submission_id,
+            actor_user_id=actor_user_id,
+            from_status=submission.status.value,
+            to_status=status.value,
+        ))
     submission.status = status
     db.commit()
     return submission
+
+
+def status_log(db: Session, submission_id: int) -> list[StatusChange]:
+    return list(
+        db.scalars(
+            select(StatusChange)
+            .where(StatusChange.submission_id == submission_id)
+            .order_by(StatusChange.created_at.desc())
+        )
+    )
+
+
+def get_submission(db: Session, submission_id: int) -> Submission | None:
+    return db.get(Submission, submission_id)
 
 
 def revoke_relay(db: Session, submission_id: int, filmmaker_id: int) -> None:

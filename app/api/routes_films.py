@@ -23,6 +23,13 @@ class FilmIn(BaseModel):
     year: int = Field(ge=1990, le=2030)
     logline: str = ""
     country: str = ""
+    synopsis: str = ""
+    language: str = ""
+    credits: str = ""
+    screener_url: str = ""
+    trailer_url: str = ""
+    first_time_filmmaker: bool = False
+    student_project: bool = False
 
 
 def film_payload(f) -> dict:
@@ -35,6 +42,13 @@ def film_payload(f) -> dict:
         "year": f.year,
         "country": f.country,
         "logline": f.logline,
+        "synopsis": f.synopsis,
+        "language": f.language,
+        "credits": f.credits,
+        "screener_url": f.screener_url,
+        "trailer_url": f.trailer_url,
+        "first_time_filmmaker": f.first_time_filmmaker,
+        "student_project": f.student_project,
     }
 
 
@@ -56,6 +70,10 @@ def create_film(db: DbDep, user: FilmmakerDep, body: FilmIn):
         film = accounts.create_film(
             db, user.id, body.title, body.genre, body.runtime_minutes, body.year,
             logline=body.logline, country=body.country, kind=body.kind,
+            synopsis=body.synopsis, language=body.language, credits=body.credits,
+            screener_url=body.screener_url, trailer_url=body.trailer_url,
+            first_time_filmmaker=body.first_time_filmmaker,
+            student_project=body.student_project,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))

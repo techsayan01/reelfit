@@ -71,10 +71,20 @@ class Film(Base):
     title: Mapped[str] = mapped_column(String(255))
     kind: Mapped[ProjectKind] = mapped_column(Enum(ProjectKind), default=ProjectKind.FILM)
     logline: Mapped[str] = mapped_column(Text, default="")
+    synopsis: Mapped[str] = mapped_column(Text, default="")
     genre: Mapped[str] = mapped_column(String(80), index=True)
     runtime_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     year: Mapped[int] = mapped_column(Integer)
     country: Mapped[str] = mapped_column(String(80), default="")
+    language: Mapped[str] = mapped_column(String(80), default="")
+    # Freeform credits, one "Name — Role" per line.
+    credits: Mapped[str] = mapped_column(Text, default="")
+    # Screener/trailer links (YouTube/Vimeo). Uploaded media comes later via
+    # object storage (BRD §7.2).
+    screener_url: Mapped[str] = mapped_column(String(512), default="")
+    trailer_url: Mapped[str] = mapped_column(String(512), default="")
+    first_time_filmmaker: Mapped[bool] = mapped_column(default=False)
+    student_project: Mapped[bool] = mapped_column(default=False)
     # Reference into S3-compatible object storage (screener/trailer). Phase 1
     # stores an opaque ref, not the media itself.
     media_ref: Mapped[str] = mapped_column(String(512), default="")
