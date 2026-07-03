@@ -9,6 +9,7 @@ const GENRES = [
 
 export default function FilmNew() {
   const navigate = useNavigate();
+  const [kind, setKind] = useState("film");
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -22,8 +23,10 @@ export default function FilmNew() {
         method: "POST",
         body: {
           title: form.get("title"),
+          kind,
           genre: form.get("genre"),
-          runtime_minutes: Number(form.get("runtime_minutes")),
+          runtime_minutes:
+            kind === "film" ? Number(form.get("runtime_minutes")) : null,
           year: Number(form.get("year")),
           country: form.get("country") || "",
           logline: form.get("logline") || "",
@@ -38,11 +41,17 @@ export default function FilmNew() {
 
   return (
     <>
-      <h1>Add a film</h1>
+      <h1>Add a project</h1>
       <p className="muted">Add it once — you can then score it and submit it anywhere.</p>
       {error && <p className="form-error">{error}</p>}
       <div className="card form-narrow">
         <form onSubmit={onSubmit}>
+          <label htmlFor="kind">Project type</label>
+          <select id="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="film">Finished film</option>
+            <option value="screenplay">Screenplay / script</option>
+          </select>
+
           <label htmlFor="title">Title</label>
           <input id="title" name="title" required />
 
@@ -53,8 +62,12 @@ export default function FilmNew() {
             ))}
           </select>
 
-          <label htmlFor="runtime_minutes">Runtime (minutes)</label>
-          <input id="runtime_minutes" name="runtime_minutes" type="number" min={1} max={600} required />
+          {kind === "film" && (
+            <>
+              <label htmlFor="runtime_minutes">Runtime (minutes)</label>
+              <input id="runtime_minutes" name="runtime_minutes" type="number" min={1} max={600} required />
+            </>
+          )}
 
           <label htmlFor="year">Year completed</label>
           <input id="year" name="year" type="number" min={1990} max={2030} required />

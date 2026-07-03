@@ -4,20 +4,22 @@ from pydantic import BaseModel, Field
 from app.api.deps import DbDep, FilmmakerDep
 from app.api.routes_festivals import festival_payload
 from app.modules.accounts import service as accounts
+from app.modules.accounts.models import ProjectKind
 from app.modules.payments import service as payments
 from app.modules.recommendations import service as recommendations
 from app.modules.scoring import service as scoring
 from app.modules.scoring.engine import FilmProfile
 from app.modules.submissions import service as submissions
-from app.modules.submissions.models import SubmissionStatus
+from app.modules.submissions.models import SELECTED_STATUSES
 
 router = APIRouter(prefix="/api/films", tags=["films"])
 
 
 class FilmIn(BaseModel):
     title: str = Field(min_length=1, max_length=255)
+    kind: ProjectKind = ProjectKind.FILM
     genre: str = Field(min_length=1, max_length=80)
-    runtime_minutes: int = Field(ge=1, le=600)
+    runtime_minutes: int | None = Field(default=None, ge=1, le=600)
     year: int = Field(ge=1990, le=2030)
     logline: str = ""
     country: str = ""
@@ -27,6 +29,7 @@ def film_payload(f) -> dict:
     return {
         "id": f.id,
         "title": f.title,
+        "kind": f.kind.value,
         "genre": f.genre,
         "runtime_minutes": f.runtime_minutes,
         "year": f.year,
@@ -49,10 +52,13 @@ def list_films(db: DbDep, user: FilmmakerDep):
 
 @router.post("", status_code=201)
 def create_film(db: DbDep, user: FilmmakerDep, body: FilmIn):
-    film = accounts.create_film(
-        db, user.id, body.title, body.genre, body.runtime_minutes, body.year,
-        logline=body.logline, country=body.country,
-    )
+    try:
+        film = accounts.create_film(
+            db, user.id, body.title, body.genre, body.runtime_minutes, body.year,
+            logline=body.logline, country=body.country, kind=body.kind,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return {"film": film_payload(film)}
 
 
@@ -93,7 +99,7 @@ def film_scores(db: DbDep, user: FilmmakerDep, film_id: int):
     selected_count = sum(
         1
         for sub in submissions.submissions_for_films(db, [film.id])
-        if sub.status == SubmissionStatus.SELECTED
+        if sub.status in SELECTED_STATUSES
     )
     guidance = recommendations.distribution_guidance(
         film.genre, film.runtime_minutes, selected_count

@@ -60,7 +60,10 @@ export default function Dashboard() {
                 <div key={film.id}>
                   <h3 style={{ margin: "0 0 4px" }}>{film.title}</h3>
                   <p className="muted" style={{ margin: "0 0 10px" }}>
-                    {film.genre} · {film.runtime_minutes} min · {film.year}
+                    {film.kind === "screenplay" ? "screenplay · " : ""}
+                    {film.genre}
+                    {film.runtime_minutes != null && <> · {film.runtime_minutes} min</>}
+                    {" · "}{film.year}
                   </p>
                   <div className="btn-row" style={{ marginTop: 0 }}>
                     <Link className="btn btn-secondary" to={`/films/${film.id}/scores`}>
@@ -90,18 +93,28 @@ export default function Dashboard() {
                     <tr><th>Film</th><th>Festival</th><th>Status</th><th>Fee</th><th>Actions</th></tr>
                   </thead>
                   <tbody>
-                    {subs.map((s) => (
+                    {subs.map((s) => {
+                      const isIn = ["selected", "award_winner", "honorable_mention"].includes(s.status);
+                      return (
                       <tr key={s.id}>
-                        <td data-label="Film">{s.film_title}</td>
+                        <td data-label="Film">
+                          {s.film_title}
+                          {s.tracking_number && (
+                            <>
+                              <br />
+                              <span className="tracking-number">{s.tracking_number}</span>
+                            </>
+                          )}
+                        </td>
                         <td data-label="Festival">{s.festival_name}</td>
                         <td data-label="Status">
-                          <span className={`tag ${s.status === "selected" ? "tag-selected" : "tag-status"}`}>
-                            {s.status.replace("_", " ")}
+                          <span className={`tag ${isIn ? "tag-selected" : "tag-status"}`}>
+                            {s.status.replaceAll("_", " ")}
                           </span>
                         </td>
                         <td data-label="Fee">{money(s.fee_paid_cents)}</td>
                         <td data-label="Actions">
-                          {s.status === "selected" && (
+                          {isIn && (
                             <a href={`/api/submissions/${s.id}/certificate.svg`}>Laurel</a>
                           )}{" "}
                           {!s.reviewed && (
@@ -116,7 +129,8 @@ export default function Dashboard() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 <p className="muted" style={{ marginTop: 12 }}>

@@ -13,7 +13,7 @@ from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.reviews import service as reviews
 from app.modules.submissions import service as submissions
-from app.modules.submissions.models import SubmissionStatus
+from app.modules.submissions.models import SELECTED_STATUSES, SubmissionStatus
 
 router = APIRouter(prefix="/api/festival", tags=["festival-admin"])
 
@@ -27,6 +27,29 @@ class StatusIn(BaseModel):
 
 class ReplyIn(BaseModel):
     reply_text: str
+
+
+class ProfileIn(BaseModel):
+    """Editable public-profile fields (BRD §5.1.7). All optional — only sent
+    fields change."""
+
+    description: str | None = None
+    country: str | None = None
+    region: str | None = None
+    logo_url: str | None = None
+    cover_url: str | None = None
+    rules: str | None = None
+    awards_and_prizes: str | None = None
+    contact_email: str | None = None
+    phone: str | None = None
+    tracking_prefix: str | None = None
+    website: str | None = None
+    twitter: str | None = None
+    instagram: str | None = None
+    venue_name: str | None = None
+    venue_address: str | None = None
+    founded_year: int | None = None
+    is_public: bool | None = None
 
 
 def _membership(db, user) -> FestivalMembership:
@@ -46,25 +69,37 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
     subs = submissions.submissions_for_festival(db, festival.id)
     festival_reviews = reviews.reviews_for_festival(db, festival.id)
 
+    categories = {
+        c.id: c.name
+        for e in festivals.get_festival(db, membership.festival_id).editions
+        for c in festivals.categories_for_edition(db, e.id)
+    }
     sub_rows = []
     for s in subs:
         film = accounts.get_film(db, s.film_id)
         sub_rows.append({
             "id": s.id,
+            "tracking_number": s.tracking_number,
             "film_title": film.title,
+            "film_kind": film.kind.value,
             "film_genre": film.genre,
             "film_runtime_minutes": film.runtime_minutes,
+            "film_country": film.country,
+            "category": categories.get(s.category_id, ""),
             # Masked contact: festivals see the relay handle, never an email
             # (BRD §5.2.1), unless the filmmaker revoked access entirely.
             "contact": "access revoked" if s.relay_revoked else s.relay_contact_id,
             "fee_paid_cents": s.fee_paid_cents,
             "status": s.status.value,
+            # Status changes always notify the filmmaker automatically.
+            "notified": s.status != SubmissionStatus.RECEIVED,
             "created_at": s.created_at.isoformat(),
         })
 
     return {
-        "festival": festival_payload(festival),
+        "festival": {**festival_payload(festival), "rules": festival.rules},
         "role": membership.role.value,
+        "can_edit_profile": membership.role == OrgRole.OWNER,
         "can_update": membership.role in STATUS_ROLES,
         "overview": {
             "total_submissions": overview.total_submissions,
@@ -87,6 +122,17 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
     }
 
 
+@router.patch("/profile")
+def update_profile(db: DbDep, user: OrganizerDep, body: ProfileIn):
+    membership = _membership(db, user)
+    if membership.role != OrgRole.OWNER:
+        raise HTTPException(403, "Only the festival owner can edit the public profile.")
+    festival = festivals.update_profile(
+        db, membership.festival_id, body.model_dump(exclude_unset=True)
+    )
+    return {"festival": {**festival_payload(festival), "rules": festival.rules}}
+
+
 @router.post("/submissions/{submission_id}/status")
 def update_status(db: DbDep, user: OrganizerDep, submission_id: int, body: StatusIn):
     membership = _membership(db, user)
@@ -106,7 +152,10 @@ def update_status(db: DbDep, user: OrganizerDep, submission_id: int, body: Statu
     friendly = {
         SubmissionStatus.IN_REVIEW: "is now in review",
         SubmissionStatus.SHORTLISTED: "has been shortlisted",
+        SubmissionStatus.FINALIST: "is a FINALIST",
         SubmissionStatus.SELECTED: "has been SELECTED 🎉",
+        SubmissionStatus.AWARD_WINNER: "is an AWARD WINNER 🏆",
+        SubmissionStatus.HONORABLE_MENTION: "received an honorable mention",
         SubmissionStatus.REJECTED: "was not selected this time",
         SubmissionStatus.RECEIVED: "was received",
     }[body.status]
@@ -116,7 +165,7 @@ def update_status(db: DbDep, user: OrganizerDep, submission_id: int, body: Statu
         kind=NotificationKind.STATUS_CHANGE,
         subject=f"“{film.title}” {friendly} at {festival.name}",
     )
-    if body.status == SubmissionStatus.SELECTED:
+    if body.status in SELECTED_STATUSES:
         certificates.issue_certificate(db, sub.id)
     db.commit()
     return {"ok": True}

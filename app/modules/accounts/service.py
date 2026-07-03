@@ -11,7 +11,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.accounts.models import Film, User, UserKind
+from app.modules.accounts.models import Film, ProjectKind, User, UserKind
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
 
@@ -78,16 +78,20 @@ def create_film(
     filmmaker_id: int,
     title: str,
     genre: str,
-    runtime_minutes: int,
+    runtime_minutes: int | None,
     year: int,
     logline: str = "",
     country: str = "",
+    kind: ProjectKind = ProjectKind.FILM,
 ) -> Film:
+    if kind == ProjectKind.FILM and runtime_minutes is None:
+        raise ValueError("Films need a runtime.")
     film = Film(
         filmmaker_id=filmmaker_id,
         title=title.strip(),
+        kind=kind,
         genre=genre.strip().lower(),
-        runtime_minutes=runtime_minutes,
+        runtime_minutes=runtime_minutes if kind == ProjectKind.FILM else None,
         year=year,
         logline=logline.strip(),
         country=country.strip(),

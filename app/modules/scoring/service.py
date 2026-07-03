@@ -40,9 +40,9 @@ def score_film_against_festival(
 def score_film_everywhere(
     db: Session, film_id: int, profile: FilmProfile
 ) -> list[tuple[Festival, FitScore, FitResult]]:
-    """Score one film against all listed festivals. Caller is responsible for
-    charging exactly one scoring credit for the whole run."""
-    festivals = list(db.scalars(select(Festival)))
+    """Score one film against all publicly listed festivals. Caller is
+    responsible for charging exactly one scoring credit for the whole run."""
+    festivals = list(db.scalars(select(Festival).where(Festival.is_public.is_(True))))
     out = []
     for festival in festivals:
         record, result = score_film_against_festival(db, film_id, festival.id, profile)

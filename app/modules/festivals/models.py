@@ -18,6 +18,14 @@ class CalibrationStatus(str, enum.Enum):
     CALIBRATING = "calibrating"
 
 
+class CategoryKind(str, enum.Enum):
+    """What a category accepts: finished films or scripts (BRD §5.1.2 lists
+    screenplays alongside shorts/features/documentaries)."""
+
+    FILM = "film"
+    SCREENPLAY = "screenplay"
+
+
 class Festival(Base):
     __tablename__ = "festivals"
 
@@ -30,6 +38,26 @@ class Festival(Base):
     calibration_status: Mapped[CalibrationStatus] = mapped_column(
         Enum(CalibrationStatus), default=CalibrationStatus.CALIBRATING
     )
+    # Public profile & branding (BRD §5.1.7). Phase 1 stores URLs; uploads
+    # move to object storage later.
+    logo_url: Mapped[str] = mapped_column(String(512), default="")
+    cover_url: Mapped[str] = mapped_column(String(512), default="")
+    rules: Mapped[str] = mapped_column(Text, default="")
+    awards_and_prizes: Mapped[str] = mapped_column(Text, default="")
+    contact_email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    website: Mapped[str] = mapped_column(String(255), default="")
+    twitter: Mapped[str] = mapped_column(String(255), default="")
+    instagram: Mapped[str] = mapped_column(String(255), default="")
+    venue_name: Mapped[str] = mapped_column(String(255), default="")
+    venue_address: Mapped[str] = mapped_column(String(512), default="")
+    founded_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Tracking sequence for submission reference numbers (e.g. HIL1001).
+    tracking_prefix: Mapped[str] = mapped_column(String(10), default="")
+    tracking_next: Mapped[int] = mapped_column(Integer, default=1001)
+    # Non-public listings are visible only to their own staff — useful while
+    # a festival sets up its profile before launch.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     editions: Mapped[list["FestivalEdition"]] = relationship(back_populates="festival")
@@ -60,6 +88,8 @@ class Category(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     edition_id: Mapped[int] = mapped_column(ForeignKey("festival_editions.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))  # e.g. "Short Documentary"
+    kind: Mapped[CategoryKind] = mapped_column(Enum(CategoryKind), default=CategoryKind.FILM)
+    # Runtime rules apply to film categories only.
     min_runtime_minutes: Mapped[int] = mapped_column(Integer, default=0)
     max_runtime_minutes: Mapped[int] = mapped_column(Integer, default=600)
     base_fee_cents: Mapped[int] = mapped_column(Integer, default=0)

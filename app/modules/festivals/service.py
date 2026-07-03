@@ -7,22 +7,62 @@ from sqlalchemy.orm import Session
 
 from app.modules.festivals.models import (
     Category,
+    CategoryKind,
     DeadlineTier,
     Festival,
     FestivalEdition,
     HistoricalSelection,
 )
 
+# Festival profile fields organizers may edit through update_profile.
+PROFILE_FIELDS = (
+    "description", "country", "region", "logo_url", "cover_url", "rules",
+    "awards_and_prizes", "contact_email", "phone", "website", "twitter",
+    "instagram", "venue_name", "venue_address", "founded_year", "is_public",
+    "tracking_prefix",
+)
+
+
+def default_tracking_prefix(name: str) -> str:
+    letters = [c for c in name.upper() if c.isalpha()]
+    return "".join(letters[:3]) or "SUB"
+
+
+def assign_tracking_number(db: Session, festival_id: int) -> str:
+    """Hand out the next submission reference number (e.g. HIL1001)."""
+    festival = db.get(Festival, festival_id)
+    prefix = festival.tracking_prefix or default_tracking_prefix(festival.name)
+    number = f"{prefix}{festival.tracking_next}"
+    festival.tracking_next += 1
+    return number
+
 
 def list_festivals(
-    db: Session, *, region: str | None = None, query: str | None = None
+    db: Session,
+    *,
+    region: str | None = None,
+    query: str | None = None,
+    public_only: bool = True,
 ) -> list[Festival]:
     stmt = select(Festival).order_by(Festival.name)
+    if public_only:
+        stmt = stmt.where(Festival.is_public.is_(True))
     if region:
         stmt = stmt.where(Festival.region == region)
     if query:
         stmt = stmt.where(Festival.name.ilike(f"%{query}%"))
     return list(db.scalars(stmt))
+
+
+def update_profile(db: Session, festival_id: int, changes: dict) -> Festival:
+    festival = db.get(Festival, festival_id)
+    if festival is None:
+        raise ValueError("Festival not found")
+    for field, value in changes.items():
+        if field in PROFILE_FIELDS and value is not None:
+            setattr(festival, field, value)
+    db.commit()
+    return festival
 
 
 def get_festival(db: Session, festival_id: int) -> Festival | None:
@@ -57,15 +97,33 @@ def active_deadline_tier(db: Session, edition_id: int) -> DeadlineTier | None:
     )
 
 
+def all_deadline_tiers(db: Session, edition_id: int) -> list[DeadlineTier]:
+    """Every tier of an edition, ordered — powers the public deadline timeline."""
+    return list(
+        db.scalars(
+            select(DeadlineTier)
+            .where(DeadlineTier.edition_id == edition_id)
+            .order_by(DeadlineTier.deadline)
+        )
+    )
+
+
 def category_fee_cents(category: Category, tier: DeadlineTier | None) -> int:
     return max(0, category.base_fee_cents + (tier.fee_delta_cents if tier else 0))
 
 
 def eligible_category(
-    category: Category, runtime_minutes: int, year: int
+    category: Category, project_kind: str, runtime_minutes: int | None, year: int
 ) -> bool:
-    if not (category.min_runtime_minutes <= runtime_minutes <= category.max_runtime_minutes):
+    if category.kind.value != project_kind:
         return False
+    if category.kind == CategoryKind.FILM:
+        if runtime_minutes is None:
+            return False
+        if not (
+            category.min_runtime_minutes <= runtime_minutes <= category.max_runtime_minutes
+        ):
+            return False
     if category.min_production_year and year < category.min_production_year:
         return False
     return True

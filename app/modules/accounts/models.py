@@ -53,17 +53,26 @@ class FestivalMembership(Base):
     role: Mapped[OrgRole] = mapped_column(Enum(OrgRole), default=OrgRole.VIEWER)
 
 
+class ProjectKind(str, enum.Enum):
+    FILM = "film"
+    SCREENPLAY = "screenplay"
+
+
 class Film(Base):
-    """Filmmaker's project library entry: upload once, submit to many (BRD §5.2.1)."""
+    """Filmmaker's project library entry: upload once, submit to many (BRD §5.2.1).
+
+    Covers both finished films and screenplays; runtime applies to films only.
+    """
 
     __tablename__ = "films"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     filmmaker_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[ProjectKind] = mapped_column(Enum(ProjectKind), default=ProjectKind.FILM)
     logline: Mapped[str] = mapped_column(Text, default="")
     genre: Mapped[str] = mapped_column(String(80), index=True)
-    runtime_minutes: Mapped[int] = mapped_column(Integer)
+    runtime_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     year: Mapped[int] = mapped_column(Integer)
     country: Mapped[str] = mapped_column(String(80), default="")
     # Reference into S3-compatible object storage (screener/trailer). Phase 1

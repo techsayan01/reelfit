@@ -5,13 +5,19 @@ from datetime import date, timedelta
 
 from app.db import SessionLocal
 from app.modules.festivals import service as festivals_svc
-from app.modules.festivals.models import Category, DeadlineTier, Festival, FestivalEdition
+from app.modules.festivals.models import (
+    Category, CategoryKind, DeadlineTier, Festival, FestivalEdition,
+)
 
 
-def _seed_festival(history: int = 40) -> int:
+def _seed_festival(history: int = 40, is_public: bool = True) -> int:
     db = SessionLocal()
     today = date.today()
-    fest = Festival(name="Test Fest", slug="test-fest", description="A test festival")
+    fest = Festival(
+        name="Test Fest", slug="test-fest", description="A test festival",
+        is_public=is_public, founded_year=today.year - 2,
+        rules="English subtitles required.",
+    )
     db.add(fest)
     db.flush()
     edition = FestivalEdition(
@@ -23,6 +29,10 @@ def _seed_festival(history: int = 40) -> int:
     db.add(Category(
         edition_id=edition.id, name="Short Film",
         min_runtime_minutes=1, max_runtime_minutes=40, base_fee_cents=3000,
+    ))
+    db.add(Category(
+        edition_id=edition.id, name="Feature Script",
+        kind=CategoryKind.SCREENPLAY, base_fee_cents=4500,
     ))
     db.add(DeadlineTier(
         edition_id=edition.id, name="Regular",
@@ -148,6 +158,141 @@ def test_ineligible_runtime_rejected(client):
         "film_id": film_id, "festival_id": 1, "category_id": 1,
     })
     assert resp.status_code == 400
+
+
+def test_festival_public_profile(client):
+    _seed_festival()
+    resp = client.get("/api/festivals/test-fest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["festival"]["rules"] == "English subtitles required."
+    assert data["stats"]["years_running"] == 3
+    assert data["stats"]["total_submissions"] == 0
+    # Timeline: opening date + one deadline tier
+    labels = [t["label"] for t in data["timeline"]]
+    assert "Opening date" in labels and "Regular" in labels
+    assert any(t["is_current"] for t in data["timeline"])
+
+
+def test_non_public_festival_hidden(client):
+    _seed_festival(is_public=False)
+    assert client.get("/api/festivals").json()["festivals"] == []
+    assert client.get("/api/festivals/test-fest").status_code == 404
+
+
+def test_screenplay_flow(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    # Screenplay project: no runtime
+    resp = client.post("/api/films", json={
+        "title": "The Last Projectionist", "kind": "screenplay",
+        "genre": "drama", "year": date.today().year,
+    })
+    assert resp.status_code == 201
+    film_id = resp.json()["film"]["id"]
+
+    # A film without runtime is rejected
+    resp = client.post("/api/films", json={
+        "title": "No Runtime Film", "kind": "film",
+        "genre": "drama", "year": date.today().year,
+    })
+    assert resp.status_code == 400
+
+    # Only the screenplay category is eligible
+    resp = client.get(f"/api/submissions/options?film={film_id}&festival=1")
+    cats = resp.json()["categories"]
+    assert [c["name"] for c in cats] == ["Feature Script"]
+
+    # Scoring a screenplay works (runtime component neutral)
+    resp = client.post(f"/api/films/{film_id}/score")
+    assert resp.status_code == 200
+
+    # Submitting to the screenplay category works
+    resp = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": cats[0]["id"],
+    })
+    assert resp.status_code == 201
+
+
+def test_profile_update_owner_only(client):
+    _seed_festival()
+    # Organizer registered without a festival gets 403 on the dashboard;
+    # register one with a festival, then edit its profile.
+    resp = client.post("/api/auth/register", json={
+        "email": "org@example.com", "password": "password123",
+        "display_name": "Org", "kind": "organizer", "festival_name": "My New Fest",
+    })
+    assert resp.status_code == 200
+    resp = client.patch("/api/festival/profile", json={
+        "venue_name": "Tapaste Cafe", "founded_year": 2023, "rules": "New rules.",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["festival"]["venue_name"] == "Tapaste Cafe"
+
+    resp = client.get("/api/festival/dashboard")
+    assert resp.json()["can_edit_profile"] is True
+
+
+def test_tracking_numbers_sequential(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    ids = []
+    for i, title in enumerate(["Film A", "Film B"]):
+        resp = client.post("/api/films", json={
+            "title": title, "genre": "documentary",
+            "runtime_minutes": 20, "year": date.today().year,
+        })
+        film_id = resp.json()["film"]["id"]
+        resp = client.post("/api/submissions", json={
+            "film_id": film_id, "festival_id": 1, "category_id": 1,
+        })
+        ids.append(resp.json()["submission"]["id"])
+    subs = client.get("/api/submissions").json()["submissions"]
+    numbers = sorted(s["tracking_number"] for s in subs)
+    # Default prefix from "Test Fest" initials, sequential from 1001.
+    assert numbers == ["TES1001", "TES1002"]
+
+
+def test_award_status_grants_certificate(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    resp = client.post("/api/films", json={
+        "title": "Winner", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    })
+    film_id = resp.json()["film"]["id"]
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+    }).json()["submission"]["id"]
+
+    # Organizer takes over their own festival and awards the film.
+    client.post("/api/auth/register", json={
+        "email": "org2@example.com", "password": "password123",
+        "display_name": "Org", "kind": "organizer",
+    })
+    from app.db import SessionLocal
+    from app.modules.accounts.models import FestivalMembership, OrgRole
+    db = SessionLocal()
+    org_id = 2  # second registered user
+    db.add(FestivalMembership(user_id=org_id, festival_id=1, role=OrgRole.OWNER))
+    db.commit()
+    db.close()
+    resp = client.post(f"/api/festival/submissions/{sub_id}/status", json={
+        "status": "award_winner",
+    })
+    assert resp.status_code == 200
+    dash = client.get("/api/festival/dashboard").json()
+    row = next(s for s in dash["submissions"] if s["id"] == sub_id)
+    assert row["status"] == "award_winner"
+    assert row["notified"] is True
+
+    # Filmmaker can download the laurel for an award-winner status.
+    client.post("/api/auth/login", json={
+        "email": "p@example.com", "password": "password123",
+    })
+    resp = client.get(f"/api/submissions/{sub_id}/certificate.svg")
+    assert resp.status_code == 200
+    assert "OFFICIAL SELECTION" in resp.text
 
 
 def test_festival_dashboard_requires_organizer(client):

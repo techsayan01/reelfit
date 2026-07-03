@@ -21,7 +21,7 @@ MIN_RECORDS_FOR_VALIDATION = 30
 @dataclass(frozen=True)
 class FilmProfile:
     genre: str
-    runtime_minutes: int
+    runtime_minutes: int | None  # None for screenplays
     year: int
     country: str = ""
 
@@ -76,7 +76,8 @@ def compute_fit(film: FilmProfile, history: list[HistoricalSelection]) -> FitRes
             )
 
     # Runtime fit: distance from the median runtime of selected films.
-    if selected:
+    # Screenplays have no runtime — the component stays neutral.
+    if selected and film.runtime_minutes is not None:
         runtimes = sorted(h.runtime_minutes for h in selected)
         median_rt = runtimes[len(runtimes) // 2]
         distance = abs(film.runtime_minutes - median_rt)

@@ -13,13 +13,26 @@ def utcnow() -> datetime:
 
 
 class SubmissionStatus(str, enum.Enum):
-    """Judging status lifecycle (BRD §5.1.3)."""
+    """Judging status lifecycle (BRD §5.1.3), extended with the award tiers
+    festivals actually use (finalist, award winner, honorable mention)."""
 
     RECEIVED = "received"
     IN_REVIEW = "in_review"
     SHORTLISTED = "shortlisted"
+    FINALIST = "finalist"
     SELECTED = "selected"
+    AWARD_WINNER = "award_winner"
+    HONORABLE_MENTION = "honorable_mention"
     REJECTED = "rejected"
+
+
+# Statuses that count as "the film made it in" — certificates and public
+# selection stats key off these.
+SELECTED_STATUSES = {
+    SubmissionStatus.SELECTED,
+    SubmissionStatus.AWARD_WINNER,
+    SubmissionStatus.HONORABLE_MENTION,
+}
 
 
 def new_relay_id() -> str:
@@ -41,6 +54,8 @@ class Submission(Base):
     )
     fee_paid_cents: Mapped[int] = mapped_column(Integer, default=0)
     discount_code: Mapped[str] = mapped_column(String(60), default="")
+    # Festival-facing reference number, e.g. HIL1001 (prefix + sequence).
+    tracking_number: Mapped[str] = mapped_column(String(24), default="", index=True)
     relay_contact_id: Mapped[str] = mapped_column(String(60), default=new_relay_id)
     relay_revoked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

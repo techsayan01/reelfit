@@ -40,7 +40,12 @@ export default function FilmScores() {
   return (
     <>
       <h1>Where “{film.title}” fits</h1>
-      <p className="muted">{film.genre} · {film.runtime_minutes} min · {film.year}</p>
+      <p className="muted">
+        {film.kind === "screenplay" ? "screenplay · " : ""}
+        {film.genre}
+        {film.runtime_minutes != null && <> · {film.runtime_minutes} min</>}
+        {" · "}{film.year}
+      </p>
 
       {scores.length > 0 ? (
         <div className="card">

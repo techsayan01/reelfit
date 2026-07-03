@@ -11,12 +11,12 @@ import random
 from datetime import date, timedelta
 
 from app.db import SessionLocal, create_all
-from app.modules.accounts.models import FestivalMembership, OrgRole, UserKind
+from app.modules.accounts.models import FestivalMembership, OrgRole, ProjectKind, UserKind
 from app.modules.accounts import service as accounts
 from app.modules.discounts.models import DiscountCode, DiscountKind
 from app.modules.festivals import service as festivals_svc
 from app.modules.festivals.models import (
-    CalibrationStatus, Category, DeadlineTier, Festival, FestivalEdition,
+    CalibrationStatus, Category, CategoryKind, DeadlineTier, Festival, FestivalEdition,
 )
 
 FESTIVALS = [
@@ -56,7 +56,7 @@ def seed() -> None:
         return
 
     fests = []
-    for name, country, region, desc, history_n, bias in FESTIVALS:
+    for i, (name, country, region, desc, history_n, bias) in enumerate(FESTIVALS):
         slug = name.lower().replace(" ", "-")
         fest = Festival(
             name=name, slug=slug, description=desc, country=country, region=region,
@@ -64,7 +64,28 @@ def seed() -> None:
                 CalibrationStatus.VALIDATED if history_n >= 30
                 else CalibrationStatus.CALIBRATING
             ),
+            rules=(
+                "All entries must include a screener link. Non-English films need "
+                "English subtitles. Multiple submissions are allowed, one entry "
+                "per project per category. Fees are non-refundable once judging begins."
+            ),
+            contact_email=f"hello@{slug.replace('-', '')}.example.com",
+            website=f"https://{slug.replace('-', '')}.example.com",
+            founded_year=today.year - (3 + i % 4),
         )
+        if i == 0:
+            # The founder's festival gets the full FilmFreeway-parity profile.
+            fest.venue_name = "Tapaste - The Spanish Cafe & Restaurant"
+            fest.venue_address = "Kolkata, West Bengal 700029, India"
+            fest.instagram = "https://instagram.com/hillsidefest"
+            fest.twitter = "https://x.com/hillsidefest"
+            fest.phone = "+91 98300 00000"
+            fest.tracking_prefix = "HIL"
+            fest.awards_and_prizes = (
+                "Every selected film receives official laurels and a screening "
+                "at the annual event. Winners in each main category receive a "
+                "certificate and a live Q&A slot. Finalists receive certificates."
+            )
         db.add(fest)
         db.flush()
         fests.append(fest)
@@ -91,6 +112,10 @@ def seed() -> None:
             cats.append(Category(
                 edition_id=edition.id, name="Documentary",
                 min_runtime_minutes=20, max_runtime_minutes=240, base_fee_cents=5500,
+            ))
+            cats.append(Category(
+                edition_id=edition.id, name="Feature Script / Screenplay",
+                kind=CategoryKind.SCREENPLAY, base_fee_cents=4500,
             ))
         db.add_all(cats)
 
@@ -124,11 +149,17 @@ def seed() -> None:
         db, "priya@example.com", "reelfit-demo", "Priya Sharma", UserKind.FILMMAKER
     )
     priya.credit_balance = 3
-    accounts.create_film(db, priya.id, "Monsoon Letters", "documentary", 24, today.year - 1,
-                         logline="Three postal workers keep a flooded town connected.",
-                         country="India")
-    accounts.create_film(db, priya.id, "Glass Houses", "drama", 96, today.year - 1,
-                         logline="A family reunion unravels over one weekend.",
+    monsoon = accounts.create_film(
+        db, priya.id, "Monsoon Letters", "documentary", 24, today.year - 1,
+        logline="Three postal workers keep a flooded town connected.",
+        country="India")
+    glass = accounts.create_film(
+        db, priya.id, "Glass Houses", "drama", 96, today.year - 1,
+        logline="A family reunion unravels over one weekend.",
+        country="India")
+    accounts.create_film(db, priya.id, "The Last Projectionist", "drama", None,
+                         today.year, kind=ProjectKind.SCREENPLAY,
+                         logline="A dying cinema's projectionist refuses to go digital.",
                          country="India")
 
     organizer = accounts.register_user(
@@ -138,6 +169,30 @@ def seed() -> None:
         user_id=organizer.id, festival_id=fests[0].id, role=OrgRole.OWNER
     ))
     db.commit()
+
+    # Demo submissions to the founder's festival so the submissions manager
+    # has content: one under review, one selected.
+    from app.modules.submissions import service as submissions_svc
+    from app.modules.submissions.models import SubmissionStatus
+
+    hillside = fests[0]
+    for film, category_name, status in (
+        (monsoon, "Documentary", SubmissionStatus.SELECTED),
+        (glass, "Feature Film", SubmissionStatus.IN_REVIEW),
+    ):
+        edition = festivals_svc.current_edition(db, hillside.id)
+        category = next(
+            c for c in festivals_svc.categories_for_edition(db, edition.id)
+            if c.name == category_name
+        )
+        sub = submissions_svc.create_submission(
+            db, filmmaker_id=priya.id, film_id=film.id, film_kind=film.kind.value,
+            film_runtime=film.runtime_minutes, film_year=film.year,
+            film_title=film.title, festival_id=hillside.id, category_id=category.id,
+        )
+        if status != SubmissionStatus.RECEIVED:
+            submissions_svc.update_status(db, sub.id, status)
+
     print(f"Seeded {len(fests)} festivals and 2 demo accounts (password: reelfit-demo).")
 
 

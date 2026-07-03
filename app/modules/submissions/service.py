@@ -25,7 +25,8 @@ def create_submission(
     *,
     filmmaker_id: int,
     film_id: int,
-    film_runtime: int,
+    film_kind: str,
+    film_runtime: int | None,
     film_year: int,
     film_title: str,
     festival_id: int,
@@ -45,10 +46,11 @@ def create_submission(
     )
     if category is None:
         raise SubmissionError("That category does not exist for this edition.")
-    if not festivals.eligible_category(category, film_runtime, film_year):
+    if not festivals.eligible_category(category, film_kind, film_runtime, film_year):
         raise SubmissionError(
             f"“{film_title}” doesn't meet the {category.name} rules "
-            f"(runtime {category.min_runtime_minutes}–{category.max_runtime_minutes} min"
+            f"({category.kind.value} category, runtime "
+            f"{category.min_runtime_minutes}–{category.max_runtime_minutes} min"
             + (f", produced {category.min_production_year} or later" if category.min_production_year else "")
             + ")."
         )
@@ -87,6 +89,7 @@ def create_submission(
         category_id=category_id,
         fee_paid_cents=fee,
         discount_code=applied_code,
+        tracking_number=festivals.assign_tracking_number(db, festival_id),
     )
     db.add(submission)
     db.flush()

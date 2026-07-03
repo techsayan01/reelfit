@@ -11,7 +11,7 @@ from app.modules.festivals import service as festivals
 from app.modules.notifications import service as notifications
 from app.modules.reviews import service as reviews
 from app.modules.submissions import service as submissions
-from app.modules.submissions.models import SubmissionStatus
+from app.modules.submissions.models import SELECTED_STATUSES
 from app.modules.submissions.service import SubmissionError
 
 router = APIRouter(prefix="/api/submissions", tags=["submissions"])
@@ -43,6 +43,7 @@ def my_submissions(db: DbDep, user: FilmmakerDep):
         "submissions": [
             {
                 "id": s.id,
+                "tracking_number": s.tracking_number,
                 "film_id": s.film_id,
                 "film_title": films_by_id[s.film_id].title,
                 "festival_id": s.festival_id,
@@ -81,7 +82,9 @@ def submission_options(db: DbDep, user: FilmmakerDep, film: int, festival: int):
     tier = festivals.active_deadline_tier(db, edition.id) if edition else None
     eligible = [
         c for c in categories
-        if festivals.eligible_category(c, film_obj.runtime_minutes, film_obj.year)
+        if festivals.eligible_category(
+            c, film_obj.kind.value, film_obj.runtime_minutes, film_obj.year
+        )
     ]
     return {
         "festival": {"id": fest.id, "name": fest.name, "slug": fest.slug},
@@ -107,6 +110,7 @@ def create_submission(db: DbDep, user: FilmmakerDep, body: SubmissionIn):
             db,
             filmmaker_id=user.id,
             film_id=film.id,
+            film_kind=film.kind.value,
             film_runtime=film.runtime_minutes,
             film_year=film.year,
             film_title=film.title,
@@ -129,7 +133,7 @@ def revoke_relay(db: DbDep, user: FilmmakerDep, submission_id: int):
 @router.get("/{submission_id}/certificate.svg")
 def certificate_svg(db: DbDep, user: FilmmakerDep, submission_id: int):
     sub = own_submission(db, user, submission_id)
-    if sub.status != SubmissionStatus.SELECTED:
+    if sub.status not in SELECTED_STATUSES:
         raise HTTPException(403, "Certificates are available once a film is selected.")
     fest = festivals.get_festival(db, sub.festival_id)
     edition = next((e for e in fest.editions if e.id == sub.edition_id), None)
