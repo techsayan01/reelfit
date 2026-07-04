@@ -24,7 +24,7 @@ export default function Submit() {
   if (error && !options) return <p className="form-error">{error}</p>;
   if (!options) return <p className="center-note">Loading…</p>;
 
-  const { film, festival, edition, tier, categories } = options;
+  const { film, festival, edition, tier, categories, waiver_required } = options;
   const chosen = categories.find((c) => c.id === Number(categoryId));
 
   const onSubmit = async (e) => {
@@ -70,6 +70,13 @@ export default function Submit() {
       )}
       {edition && categories.length > 0 && (
         <div className="card form-narrow">
+          {waiver_required && (
+            <div className="confirm-note">
+              {festival.name}'s final deadline has passed. Late entries are
+              accepted for a short window — you'll need a <strong>deadline
+              waiver code</strong> from the festival to submit.
+            </div>
+          )}
           <form onSubmit={onSubmit}>
             <label htmlFor="category_id">Category</label>
             <select

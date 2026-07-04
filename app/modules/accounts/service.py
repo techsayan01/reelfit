@@ -11,7 +11,14 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modules.accounts.models import Film, ProjectKind, User, UserKind
+from app.modules.accounts.models import (
+    FestivalMembership,
+    Film,
+    OrgRole,
+    ProjectKind,
+    User,
+    UserKind,
+)
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
 
@@ -63,6 +70,44 @@ def authenticate(db: Session, email: str, password: str) -> User | None:
 
 def get_user(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
+
+
+def festival_staff(db: Session, festival_id: int) -> list[tuple[FestivalMembership, User]]:
+    memberships = db.scalars(
+        select(FestivalMembership).where(FestivalMembership.festival_id == festival_id)
+    )
+    return [(m, db.get(User, m.user_id)) for m in memberships]
+
+
+def add_staff(db: Session, festival_id: int, email: str, role: OrgRole) -> FestivalMembership:
+    """Add an existing Reelfit account as festival staff (BRD §5.1.1)."""
+    user = db.scalar(select(User).where(User.email == email.strip().lower()))
+    if user is None:
+        raise ValueError(
+            "No Reelfit account with that email — ask them to register first."
+        )
+    existing = db.scalar(
+        select(FestivalMembership).where(
+            FestivalMembership.user_id == user.id,
+            FestivalMembership.festival_id == festival_id,
+        )
+    )
+    if existing:
+        raise ValueError(f"{user.display_name} is already on this festival's staff.")
+    membership = FestivalMembership(user_id=user.id, festival_id=festival_id, role=role)
+    db.add(membership)
+    db.commit()
+    return membership
+
+
+def remove_staff(db: Session, membership_id: int, festival_id: int) -> None:
+    membership = db.get(FestivalMembership, membership_id)
+    if membership is None or membership.festival_id != festival_id:
+        raise ValueError("Staff member not found.")
+    if membership.role == OrgRole.OWNER:
+        raise ValueError("The festival owner can't be removed.")
+    db.delete(membership)
+    db.commit()
 
 
 def list_films(db: Session, filmmaker_id: int) -> list[Film]:

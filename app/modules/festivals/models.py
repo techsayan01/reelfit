@@ -55,6 +55,9 @@ class Festival(Base):
     # Tracking sequence for submission reference numbers (e.g. HIL1001).
     tracking_prefix: Mapped[str] = mapped_column(String(10), default="")
     tracking_next: Mapped[int] = mapped_column(Integer, default=1001)
+    # How many days after the final deadline deadline-waiver codes still work
+    # (0 = no late entries).
+    deadline_waiver_days: Mapped[int] = mapped_column(Integer, default=0)
     # Non-public listings are visible only to their own staff — useful while
     # a festival sets up its profile before launch.
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)

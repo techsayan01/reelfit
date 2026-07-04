@@ -19,7 +19,7 @@ PROFILE_FIELDS = (
     "description", "country", "region", "logo_url", "cover_url", "rules",
     "awards_and_prizes", "contact_email", "phone", "website", "twitter",
     "instagram", "venue_name", "venue_address", "founded_year", "is_public",
-    "tracking_prefix",
+    "tracking_prefix", "deadline_waiver_days",
 )
 
 
@@ -81,6 +81,24 @@ def current_edition(db: Session, festival_id: int) -> FestivalEdition | None:
         .where(FestivalEdition.festival_id == festival_id, FestivalEdition.closes_on >= today)
         .order_by(FestivalEdition.opens_on)
     )
+
+
+def waiver_window_edition(db: Session, festival_id: int) -> FestivalEdition | None:
+    """The most recently closed edition still inside the festival's deadline
+    waiver window, or None. Late entries into it need a deadline-waiver code."""
+    festival = db.get(Festival, festival_id)
+    if festival is None or festival.deadline_waiver_days <= 0:
+        return None
+    today = date.today()
+    edition = db.scalar(
+        select(FestivalEdition)
+        .where(FestivalEdition.festival_id == festival_id, FestivalEdition.closes_on < today)
+        .order_by(FestivalEdition.closes_on.desc())
+    )
+    if edition is None:
+        return None
+    days_late = (today - edition.closes_on).days
+    return edition if days_late <= festival.deadline_waiver_days else None
 
 
 def categories_for_edition(db: Session, edition_id: int) -> list[Category]:

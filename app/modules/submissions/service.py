@@ -38,8 +38,22 @@ def create_submission(
     if festival is None:
         raise SubmissionError("Festival not found.")
     edition = festivals.current_edition(db, festival_id)
+    late_entry = False
     if edition is None:
-        raise SubmissionError(f"{festival.name} is not currently open for submissions.")
+        # Past the final deadline: a deadline-waiver code can still get the
+        # film in during the festival's waiver window.
+        edition = festivals.waiver_window_edition(db, festival_id)
+        if edition is None:
+            raise SubmissionError(f"{festival.name} is not currently open for submissions.")
+        late_entry = True
+        late_code = discounts.find_valid_code(
+            db, festival_id, discount_code, category_id, filmmaker_id
+        ) if discount_code.strip() else None
+        if late_code is None or not discounts.allows_late_entry(late_code):
+            raise SubmissionError(
+                f"{festival.name}'s final deadline has passed — submitting now "
+                "needs a valid deadline waiver code."
+            )
 
     category = next(
         (c for c in festivals.categories_for_edition(db, edition.id) if c.id == category_id),
@@ -67,20 +81,26 @@ def create_submission(
         raise SubmissionError("This film is already submitted to that category.")
 
     tier = festivals.active_deadline_tier(db, edition.id)
+    if tier is None and late_entry:
+        # Late entries pay the final (most expensive) tier.
+        all_tiers = festivals.all_deadline_tiers(db, edition.id)
+        tier = all_tiers[-1] if all_tiers else None
     fee = festivals.category_fee_cents(category, tier)
 
     applied_code = ""
-    waiver = discounts.find_waiver(db, festival_id, filmmaker_id)
+    waiver = None if late_entry else discounts.find_waiver(db, festival_id, filmmaker_id)
     if waiver:
         fee = 0
         waiver.used = 1
         applied_code = f"waiver:{waiver.reason}" if waiver.reason else "waiver"
     elif discount_code.strip():
-        dc = discounts.find_valid_code(db, festival_id, discount_code, category_id)
+        dc = discounts.find_valid_code(
+            db, festival_id, discount_code, category_id, filmmaker_id
+        )
         if dc is None:
             raise SubmissionError("That promo code isn't valid for this submission.")
-        fee = discounts.apply_discount(fee, dc)
-        discounts.redeem(db, dc)
+        fee = discounts.apply_code(fee, dc)
+        discounts.redeem(db, dc, filmmaker_id)
         applied_code = dc.code
 
     submission = Submission(

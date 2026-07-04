@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from app.db import SessionLocal, create_all
 from app.modules.accounts.models import FestivalMembership, OrgRole, ProjectKind, UserKind
 from app.modules.accounts import service as accounts
-from app.modules.discounts.models import DiscountCode, DiscountKind
+from app.modules.discounts.models import CodeType, DiscountCode, DiscountKind
 from app.modules.festivals import service as festivals_svc
 from app.modules.festivals.models import (
     CalibrationStatus, Category, CategoryKind, DeadlineTier, Festival, FestivalEdition,
@@ -81,6 +81,7 @@ def seed() -> None:
             fest.twitter = "https://x.com/hillsidefest"
             fest.phone = "+91 98300 00000"
             fest.tracking_prefix = "HIL"
+            fest.deadline_waiver_days = 14
             fest.awards_and_prizes = (
                 "Every selected film receives official laurels and a screening "
                 "at the annual event. Winners in each main category receive a "
@@ -143,7 +144,19 @@ def seed() -> None:
         db.add(DiscountCode(
             festival_id=fest.id, code="EARLYBIRD", kind=DiscountKind.PERCENT,
             amount=20, valid_to=today + timedelta(days=20), redemption_limit=100,
+            label="Launch promotion",
         ))
+        if i == 0:
+            db.add(DiscountCode(
+                festival_id=fest.id, code="OUTREACH2026",
+                code_type=CodeType.FEE_WAIVER, label="Community outreach program",
+                one_use_per_submitter=True,
+            ))
+            db.add(DiscountCode(
+                festival_id=fest.id, code="LATEPASS",
+                code_type=CodeType.DEADLINE_WAIVER, label="Programmer-invited late entries",
+                redemption_limit=10, one_use_per_submitter=True,
+            ))
 
     priya = accounts.register_user(
         db, "priya@example.com", "reelfit-demo", "Priya Sharma", UserKind.FILMMAKER
@@ -194,7 +207,24 @@ def seed() -> None:
     db.add(FestivalMembership(
         user_id=organizer.id, festival_id=fests[0].id, role=OrgRole.OWNER
     ))
+    juror = accounts.register_user(
+        db, "jury@example.com", "reelfit-demo", "Divya Kapoor", UserKind.ORGANIZER
+    )
+    db.add(FestivalMembership(
+        user_id=juror.id, festival_id=fests[0].id, role=OrgRole.JURY
+    ))
     db.commit()
+
+    # Judging rubric for the founder's festival (BRD §5.1.3).
+    from app.modules.jury import service as jury_svc
+
+    criteria = {
+        name: jury_svc.add_criterion(db, fests[0].id, name, weight)
+        for name, weight in (
+            ("Storytelling", 2.0), ("Craft", 1.0),
+            ("Originality", 1.0), ("Festival fit", 1.0),
+        )
+    }
 
     # Demo submissions to the founder's festival so the submissions manager
     # has content: one under review, one selected.
@@ -224,7 +254,17 @@ def seed() -> None:
         if status != SubmissionStatus.RECEIVED:
             submissions_svc.update_status(db, sub.id, status, actor_user_id=organizer.id)
 
-    print(f"Seeded {len(fests)} festivals and 2 demo accounts (password: reelfit-demo).")
+        # Assign Divya to judge every entry; she has scored the first one.
+        assignment = jury_svc.assign(db, sub.id, juror.id)
+        if film is monsoon:
+            jury_svc.record_scores(db, assignment.id, {
+                criteria["Storytelling"].id: 9,
+                criteria["Craft"].id: 8,
+                criteria["Originality"].id: 8,
+                criteria["Festival fit"].id: 9,
+            })
+
+    print(f"Seeded {len(fests)} festivals and 3 demo accounts (password: reelfit-demo).")
 
 
 if __name__ == "__main__":

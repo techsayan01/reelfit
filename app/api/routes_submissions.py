@@ -79,8 +79,17 @@ def submission_options(db: DbDep, user: FilmmakerDep, film: int, festival: int):
     if fest is None:
         raise HTTPException(404, "Festival not found")
     edition = festivals.current_edition(db, fest.id)
+    waiver_required = False
+    if edition is None:
+        # Past the final deadline but inside the deadline-waiver window: the
+        # form still works, with a waiver code required.
+        edition = festivals.waiver_window_edition(db, fest.id)
+        waiver_required = edition is not None
     categories = festivals.categories_for_edition(db, edition.id) if edition else []
     tier = festivals.active_deadline_tier(db, edition.id) if edition else None
+    if tier is None and waiver_required:
+        all_tiers = festivals.all_deadline_tiers(db, edition.id)
+        tier = all_tiers[-1] if all_tiers else None
     eligible = [
         c for c in categories
         if festivals.eligible_category(
@@ -92,6 +101,7 @@ def submission_options(db: DbDep, user: FilmmakerDep, film: int, festival: int):
         "film": {"id": film_obj.id, "title": film_obj.title},
         "edition": edition_payload(edition),
         "tier": tier_payload(tier),
+        "waiver_required": waiver_required,
         "categories": [
             {
                 "id": c.id,

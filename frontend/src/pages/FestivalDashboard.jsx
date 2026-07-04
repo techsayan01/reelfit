@@ -177,7 +177,7 @@ function SubmissionsManager({ data, onStatusChange }) {
           <table className="stack">
             <thead>
               <tr>
-                <th>Project</th><th>Category</th><th>Fee</th><th>Date</th><th>Judging status</th>
+                <th>Project</th><th>Category</th><th>Fee</th><th>Rating</th><th>Date</th><th>Judging status</th>
               </tr>
             </thead>
             <tbody>
@@ -201,6 +201,13 @@ function SubmissionsManager({ data, onStatusChange }) {
                   </td>
                   <td data-label="Category">{s.category}</td>
                   <td data-label="Fee">{money(s.fee_paid_cents)}</td>
+                  <td data-label="Rating">
+                    {s.rating !== null ? (
+                      <><strong>{s.rating}</strong><span className="muted">/10</span></>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                   <td data-label="Date">{new Date(s.created_at).toLocaleDateString()}</td>
                   <td data-label="Judging status">
                     {can_update ? (
@@ -225,6 +232,406 @@ function SubmissionsManager({ data, onStatusChange }) {
             </tbody>
           </table>
         </>
+      )}
+    </div>
+  );
+}
+
+function QueueCard() {
+  const [queue, setQueue] = useState([]);
+
+  useEffect(() => {
+    api("/api/festival/queue").then((d) => setQueue(d.queue)).catch(() => {});
+  }, []);
+
+  if (queue.length === 0) return null;
+  return (
+    <div className="card">
+      <h2>Your review queue ({queue.length})</h2>
+      <div className="list-divided">
+        {queue.map((q) => (
+          <p key={q.submission_id} style={{ margin: 0 }}>
+            <Link to={`/festival/submissions/${q.submission_id}`}>
+              <strong>{q.film_title}</strong>
+            </Link>{" "}
+            <span className="tracking-number">{q.tracking_number}</span>
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StaffCard({ onError }) {
+  const [staff, setStaff] = useState([]);
+  const [role, setRole] = useState("jury");
+
+  const load = useCallback(() => {
+    api("/api/festival/staff").then((d) => setStaff(d.staff)).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    try {
+      await api("/api/festival/staff", {
+        method: "POST",
+        body: { email: new FormData(form).get("email"), role },
+      });
+      form.reset();
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const remove = async (member) => {
+    if (!window.confirm(`Remove ${member.display_name} from your festival's staff?`)) return;
+    try {
+      await api(`/api/festival/staff/${member.membership_id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Staff & judges</h2>
+      <div className="list-divided">
+        {staff.map((m) => (
+          <p key={m.membership_id} style={{ margin: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <strong>{m.display_name}</strong>{" "}
+              <span className="tag tag-status">{m.role}</span>
+            </span>
+            {m.role !== "owner" && (
+              <button className="btn btn-quiet" onClick={() => remove(m)}>Remove</button>
+            )}
+          </p>
+        ))}
+      </div>
+      <form onSubmit={add}>
+        <label htmlFor="staff-email">Add by email (existing Reelfit account)</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input id="staff-email" name="email" type="email" required
+                 placeholder="jury@example.com" style={{ flex: 2, minWidth: 160 }} />
+          <select aria-label="Role" value={role} onChange={(e) => setRole(e.target.value)}
+                  style={{ flex: 1, minWidth: 110 }}>
+            <option value="programmer">programmer</option>
+            <option value="jury">jury</option>
+            <option value="viewer">viewer</option>
+          </select>
+        </div>
+        <div className="btn-row">
+          <button className="btn btn-secondary" type="submit">Add staff member</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RubricCard({ onError }) {
+  const [criteria, setCriteria] = useState([]);
+
+  const load = useCallback(() => {
+    api("/api/festival/rubric").then((d) => setCriteria(d.criteria)).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    try {
+      await api("/api/festival/rubric", {
+        method: "POST",
+        body: { name: fd.get("name"), weight: Number(fd.get("weight")) || 1 },
+      });
+      form.reset();
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Delete “${c.name}”? Existing scores for it are removed too.`)) return;
+    try {
+      await api(`/api/festival/rubric/${c.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Scoring rubric</h2>
+      <p className="muted">Judges score each entry 1–10 on these criteria; weights set their importance.</p>
+      <div className="list-divided">
+        {criteria.map((c) => (
+          <p key={c.id} style={{ margin: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span><strong>{c.name}</strong> <span className="muted">weight {c.weight}</span></span>
+            <button className="btn btn-quiet" onClick={() => remove(c)}>Delete</button>
+          </p>
+        ))}
+      </div>
+      <form onSubmit={add}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input name="name" required placeholder="e.g. Storytelling" style={{ flex: 2, minWidth: 140 }} />
+          <input name="weight" type="number" step="0.5" min="0.5" max="10"
+                 placeholder="Weight" style={{ flex: 1, minWidth: 90 }} />
+        </div>
+        <div className="btn-row">
+          <button className="btn btn-secondary" type="submit">Add criterion</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const CODE_TYPE_LABELS = {
+  discount: "Discount",
+  fee_waiver: "Entry fee waiver",
+  deadline_waiver: "Deadline waiver",
+};
+
+function codeSummary(c) {
+  if (c.code_type === "discount") {
+    return c.kind === "percent"
+      ? `${c.amount}% off entry fee`
+      : `${money(c.amount)} off entry fee`;
+  }
+  if (c.code_type === "fee_waiver") return "free entry";
+  return "late entry allowed";
+}
+
+function DiscountsCard({ onError }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [codeType, setCodeType] = useState("discount");
+  const [kind, setKind] = useState("percent");
+  const [uses, setUses] = useState("unlimited");
+
+  const load = useCallback(() => {
+    api("/api/festival/codes").then(setData).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const create = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const body = {
+      code: fd.get("code"),
+      code_type: codeType,
+      label: fd.get("label") || "",
+      category_id: fd.get("category_id") ? Number(fd.get("category_id")) : null,
+      valid_from: fd.get("valid_from") || null,
+      valid_to: fd.get("valid_to") || null,
+      redemption_limit: uses === "limited" ? Number(fd.get("max_uses")) || 1 : null,
+      one_use_per_submitter: fd.get("one_use_per_submitter") === "on",
+      also_deadline_waiver:
+        codeType === "discount" && fd.get("also_deadline_waiver") === "on",
+    };
+    if (codeType === "discount") {
+      body.kind = kind;
+      body.amount =
+        kind === "percent"
+          ? Number(fd.get("amount_percent"))
+          : Math.round(Number(fd.get("amount_dollars")) * 100);
+    }
+    try {
+      await api("/api/festival/codes", { method: "POST", body });
+      form.reset();
+      setOpen(false);
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Delete the code ${c.code}? Filmmakers won't be able to use it anymore.`)) return;
+    try {
+      await api(`/api/festival/codes/${c.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  if (!data) return null;
+
+  return (
+    <div className="card">
+      <h2>Discounts & waivers</h2>
+      {data.codes.length === 0 && (
+        <p className="muted">No codes yet — create one for partners, outreach, or late entries.</p>
+      )}
+      <div className="list-divided">
+        {data.codes.map((c) => (
+          <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+            <div>
+              <span className="tracking-number">{c.code}</span>{" "}
+              <span className="tag tag-status">{CODE_TYPE_LABELS[c.code_type]}</span>
+              {c.also_deadline_waiver && <span className="tag tag-status"> +deadline waiver</span>}
+              <br />
+              <span className="muted" style={{ fontSize: "0.9rem" }}>
+                {codeSummary(c)}
+                {" · "}
+                {c.redemptions}/{c.redemption_limit ?? "∞"} used
+                {c.one_use_per_submitter && " · one per submitter"}
+                {c.valid_to && ` · until ${c.valid_to}`}
+                {c.label && ` · ${c.label}`}
+              </span>
+            </div>
+            <button className="btn btn-quiet" onClick={() => remove(c)}>Delete</button>
+          </div>
+        ))}
+      </div>
+
+      {!open ? (
+        <div className="btn-row">
+          <button className="btn btn-secondary" onClick={() => setOpen(true)}>
+            Create a discount or waiver
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={create}>
+          <label>Code type</label>
+          {Object.entries(CODE_TYPE_LABELS).map(([value, text]) => (
+            <label key={value} style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400, margin: "4px 0" }}>
+              <input
+                type="radio"
+                name="code_type"
+                checked={codeType === value}
+                onChange={() => setCodeType(value)}
+                style={{ width: "auto", minHeight: "auto" }}
+              />
+              {text}
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                {value === "discount" && "— discounted entry fees"}
+                {value === "fee_waiver" && "— free entry to your festival"}
+                {value === "deadline_waiver" && "— entry after your final deadline"}
+              </span>
+            </label>
+          ))}
+
+          <label htmlFor="code">Code</label>
+          <input id="code" name="code" required placeholder="e.g. HILLSIDE2026"
+                 pattern="[A-Za-z0-9]+" title="Letters and numbers only" />
+
+          <label htmlFor="label">Label (optional, internal only)</label>
+          <input id="label" name="label" placeholder="e.g. Film school partnership" />
+
+          {codeType === "discount" && (
+            <>
+              <label>Discount amount</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <select aria-label="Discount kind" value={kind}
+                        onChange={(e) => setKind(e.target.value)} style={{ flex: 1, minWidth: 110 }}>
+                  <option value="percent">% off</option>
+                  <option value="flat">$ off</option>
+                </select>
+                {kind === "percent" ? (
+                  <input name="amount_percent" type="number" min="1" max="100" required
+                         placeholder="e.g. 20" style={{ flex: 1, minWidth: 90 }} />
+                ) : (
+                  <input name="amount_dollars" type="number" min="0.5" step="0.5" required
+                         placeholder="e.g. 10.00" style={{ flex: 1, minWidth: 90 }} />
+                )}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400 }}>
+                <input name="also_deadline_waiver" type="checkbox" style={{ width: "auto", minHeight: "auto" }} />
+                Allow this code to also function as a deadline waiver
+              </label>
+            </>
+          )}
+
+          <label htmlFor="category_id">Categories</label>
+          <select id="category_id" name="category_id">
+            <option value="">All categories</option>
+            {data.categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} only</option>
+            ))}
+          </select>
+
+          <label>Maximum uses</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select aria-label="Maximum uses" value={uses}
+                    onChange={(e) => setUses(e.target.value)} style={{ flex: 1, minWidth: 120 }}>
+              <option value="unlimited">Unlimited</option>
+              <option value="limited">Limit to…</option>
+            </select>
+            {uses === "limited" && (
+              <input name="max_uses" type="number" min="1" required
+                     placeholder="e.g. 50" style={{ flex: 1, minWidth: 80 }} />
+            )}
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400 }}>
+            <input name="one_use_per_submitter" type="checkbox" style={{ width: "auto", minHeight: "auto" }} />
+            Limit code to one use per submitter
+          </label>
+
+          <label htmlFor="valid_from">Start date (optional)</label>
+          <input id="valid_from" name="valid_from" type="date" />
+          <label htmlFor="valid_to">End date (optional)</label>
+          <input id="valid_to" name="valid_to" type="date" />
+
+          <div className="btn-row">
+            <button className="btn btn-primary" type="submit">Save code</button>
+            <button className="btn btn-quiet" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function WaiverPeriodCard({ festival, onSaved, onError }) {
+  const [days, setDays] = useState(festival.deadline_waiver_days ?? 0);
+  const [info, setInfo] = useState(null);
+
+  useEffect(() => {
+    api("/api/festival/codes").then(setInfo).catch(() => {});
+  }, [festival.deadline_waiver_days]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/festival/profile", {
+        method: "PATCH",
+        body: { deadline_waiver_days: Number(days) || 0 },
+      });
+      onSaved();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Deadline waiver period</h2>
+      <p className="muted">
+        How many days after your final deadline deadline-waiver codes still
+        work. Set to 0 to disallow late entries.
+      </p>
+      <form onSubmit={save} style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
+        <div style={{ width: 110 }}>
+          <label htmlFor="waiver-days">Days</label>
+          <input id="waiver-days" type="number" min="0" max="90" value={days}
+                 onChange={(e) => setDays(e.target.value)} />
+        </div>
+        <button className="btn btn-secondary" type="submit">Save</button>
+      </form>
+      {info?.waiver_accepted_through && Number(days) > 0 && (
+        <p className="muted" style={{ marginTop: 10 }}>
+          Deadline waiver codes will be accepted through{" "}
+          <strong>{info.waiver_accepted_through}</strong>.
+        </p>
       )}
     </div>
   );
@@ -316,8 +723,15 @@ export default function FestivalDashboard() {
         </div>
 
         <div>
+          <QueueCard />
           {can_edit_profile && (
-            <ProfileEditor festival={festival} onSaved={load} onError={setError} />
+            <>
+              <ProfileEditor festival={festival} onSaved={load} onError={setError} />
+              <StaffCard onError={setError} />
+              <RubricCard onError={setError} />
+              <DiscountsCard onError={setError} />
+              <WaiverPeriodCard festival={festival} onSaved={load} onError={setError} />
+            </>
           )}
           <div className="card">
             <h2>This cycle</h2>

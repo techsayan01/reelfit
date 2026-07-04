@@ -24,6 +24,155 @@ function SpecRow({ name, value }) {
   );
 }
 
+function JudgesCard({ data, submissionId, onChanged, onError }) {
+  const { judges = [], staff = [], can_update } = data;
+  const assignedIds = new Set(judges.map((j) => j.user_id));
+  const assignable = staff.filter(
+    (s) => !assignedIds.has(s.user_id) && s.role !== "viewer"
+  );
+
+  const assign = async (e) => {
+    const user_id = Number(e.target.value);
+    if (!user_id) return;
+    try {
+      await api(`/api/festival/submissions/${submissionId}/assign`, {
+        method: "POST",
+        body: { user_id },
+      });
+      onChanged();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const unassign = async (user_id) => {
+    try {
+      await api(`/api/festival/submissions/${submissionId}/unassign`, {
+        method: "POST",
+        body: { user_id },
+      });
+      onChanged();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Judges ({judges.length})</h2>
+      {judges.length === 0 && <p className="muted">No judges assigned yet.</p>}
+      <div className="list-divided">
+        {judges.map((j) => (
+          <p key={j.user_id} style={{ margin: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <strong>{j.name}</strong>{" "}
+              <span className={`tag ${j.status === "done" ? "tag-validated" : "tag-status"}`}>
+                {j.status === "done" ? "scored" : label(j.status)}
+              </span>
+            </span>
+            {can_update && (
+              <button className="btn btn-quiet" onClick={() => unassign(j.user_id)}>
+                Remove
+              </button>
+            )}
+          </p>
+        ))}
+      </div>
+      {can_update && assignable.length > 0 && (
+        <>
+          <label htmlFor="assign-judge">Assign a judge</label>
+          <select id="assign-judge" value="" onChange={assign}>
+            <option value="">Choose a staff member…</option>
+            {assignable.map((s) => (
+              <option key={s.user_id} value={s.user_id}>
+                {s.display_name} ({s.role})
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RatingCard({ data, submissionId, onChanged, onError }) {
+  const {
+    rubric = [],
+    my_scores = {},
+    rating = { average: null, judges: 0 },
+    can_rate,
+  } = data;
+  const [open, setOpen] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const scores = rubric
+      .map((c) => ({ criterion_id: c.id, score: Number(form.get(`c${c.id}`)) }))
+      .filter((s) => s.score >= 1);
+    try {
+      await api(`/api/festival/submissions/${submissionId}/rate`, {
+        method: "POST",
+        body: { scores },
+      });
+      setOpen(false);
+      onChanged();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Rating</h2>
+      {rating.average !== null ? (
+        <p>
+          <span className="display" style={{ fontSize: "1.8rem" }}>{rating.average}</span>
+          <span className="muted"> / 10 · {rating.judges} judge{rating.judges !== 1 ? "s" : ""}</span>
+        </p>
+      ) : (
+        <p className="muted">This entry has not been rated yet.</p>
+      )}
+      {can_rate && rubric.length === 0 && (
+        <p className="muted">Set up rubric criteria on the dashboard to rate entries.</p>
+      )}
+      {can_rate && rubric.length > 0 && !open && (
+        <button className="btn btn-secondary" onClick={() => setOpen(true)}>
+          {Object.keys(my_scores).length ? "Edit my scores" : "Rate this entry"}
+        </button>
+      )}
+      {can_rate && open && (
+        <form onSubmit={submit}>
+          {rubric.map((c) => (
+            <div key={c.id}>
+              <label htmlFor={`c${c.id}`}>
+                {c.name} <span className="muted">(weight {c.weight})</span>
+              </label>
+              <select
+                id={`c${c.id}`}
+                name={`c${c.id}`}
+                defaultValue={my_scores[String(c.id)] ?? ""}
+                required
+              >
+                <option value="" disabled>Score 1–10</option>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+          <div className="btn-row">
+            <button className="btn btn-primary" type="submit">Save scores</button>
+            <button className="btn btn-quiet" type="button" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function FestivalSubmissionDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -246,6 +395,9 @@ export default function FestivalSubmissionDetail() {
               <p className="muted" style={{ marginTop: 8 }}>✓ filmmaker notified of current status</p>
             )}
           </div>
+
+          <RatingCard data={data} submissionId={id} onChanged={load} onError={setError} />
+          <JudgesCard data={data} submissionId={id} onChanged={load} onError={setError} />
 
           <div className="card">
             <h2>Submission</h2>

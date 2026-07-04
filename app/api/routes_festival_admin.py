@@ -6,8 +6,12 @@ from app.api.deps import DbDep, OrganizerDep
 from app.api.routes_festivals import festival_payload
 from app.modules.accounts import service as accounts
 from app.modules.accounts.models import FestivalMembership, OrgRole
+from datetime import date, timedelta
+
 from app.modules.certificates import service as certificates
 from app.modules.dashboards import service as dashboards
+from app.modules.discounts import service as discounts
+from app.modules.discounts.models import CodeType, DiscountKind
 from app.modules.festivals import service as festivals
 from app.modules.jury import service as jury
 from app.modules.notifications import service as notifications
@@ -34,6 +38,33 @@ class NoteIn(BaseModel):
     text: str
 
 
+class StaffIn(BaseModel):
+    email: str
+    role: OrgRole
+
+
+class CriterionIn(BaseModel):
+    name: str
+    weight: float = 1.0
+
+
+class AssignIn(BaseModel):
+    user_id: int
+
+
+class ScoreItem(BaseModel):
+    criterion_id: int
+    score: int
+
+
+class RateIn(BaseModel):
+    scores: list[ScoreItem]
+
+
+# Roles allowed to score submissions against the rubric.
+RATING_ROLES = {OrgRole.OWNER, OrgRole.PROGRAMMER, OrgRole.JURY}
+
+
 class ProfileIn(BaseModel):
     """Editable public-profile fields (BRD §5.1.7). All optional — only sent
     fields change."""
@@ -55,6 +86,21 @@ class ProfileIn(BaseModel):
     venue_address: str | None = None
     founded_year: int | None = None
     is_public: bool | None = None
+    deadline_waiver_days: int | None = None
+
+
+class CodeIn(BaseModel):
+    code: str
+    code_type: CodeType
+    label: str = ""
+    kind: DiscountKind = DiscountKind.PERCENT
+    amount: int = 0
+    category_id: int | None = None
+    valid_from: date | None = None
+    valid_to: date | None = None
+    redemption_limit: int | None = None
+    also_deadline_waiver: bool = False
+    one_use_per_submitter: bool = False
 
 
 def _membership(db, user) -> FestivalMembership:
@@ -79,10 +125,14 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
         for e in festivals.get_festival(db, membership.festival_id).editions
         for c in festivals.categories_for_edition(db, e.id)
     }
+    criteria = jury.criteria_for_festival(db, membership.festival_id)
     sub_rows = []
     for s in subs:
         film = accounts.get_film(db, s.film_id)
+        average, judge_count = jury.rating_summary(db, s.id, criteria)
         sub_rows.append({
+            "rating": average,
+            "rating_judges": judge_count,
             "id": s.id,
             "tracking_number": s.tracking_number,
             "film_title": film.title,
@@ -102,7 +152,11 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
         })
 
     return {
-        "festival": {**festival_payload(festival), "rules": festival.rules},
+        "festival": {
+            **festival_payload(festival),
+            "rules": festival.rules,
+            "deadline_waiver_days": festival.deadline_waiver_days,
+        },
         "role": membership.role.value,
         "can_edit_profile": membership.role == OrgRole.OWNER,
         "can_update": membership.role in STATUS_ROLES,
@@ -136,6 +190,181 @@ def update_profile(db: DbDep, user: OrganizerDep, body: ProfileIn):
         db, membership.festival_id, body.model_dump(exclude_unset=True)
     )
     return {"festival": {**festival_payload(festival), "rules": festival.rules}}
+
+
+def _require_owner(membership) -> None:
+    if membership.role != OrgRole.OWNER:
+        raise HTTPException(403, "Only the festival owner can do that.")
+
+
+@router.get("/staff")
+def list_staff(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "staff": [
+            {
+                "membership_id": m.id,
+                "user_id": u.id,
+                "display_name": u.display_name,
+                "email": u.email,
+                "role": m.role.value,
+            }
+            for m, u in accounts.festival_staff(db, membership.festival_id)
+        ]
+    }
+
+
+@router.post("/staff", status_code=201)
+def add_staff(db: DbDep, user: OrganizerDep, body: StaffIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    if body.role == OrgRole.OWNER:
+        raise HTTPException(400, "A festival has one owner.")
+    try:
+        new_membership = accounts.add_staff(
+            db, membership.festival_id, body.email, body.role
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"membership_id": new_membership.id}
+
+
+@router.delete("/staff/{membership_id}")
+def remove_staff(db: DbDep, user: OrganizerDep, membership_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        accounts.remove_staff(db, membership_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
+@router.get("/rubric")
+def list_rubric(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "criteria": [
+            {"id": c.id, "name": c.name, "weight": c.weight}
+            for c in jury.criteria_for_festival(db, membership.festival_id)
+        ]
+    }
+
+
+@router.post("/rubric", status_code=201)
+def add_criterion(db: DbDep, user: OrganizerDep, body: CriterionIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    if not body.name.strip():
+        raise HTTPException(400, "Criterion needs a name.")
+    criterion = jury.add_criterion(db, membership.festival_id, body.name, body.weight)
+    return {"id": criterion.id}
+
+
+@router.delete("/rubric/{criterion_id}")
+def delete_criterion(db: DbDep, user: OrganizerDep, criterion_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        jury.delete_criterion(db, criterion_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/codes")
+def list_codes(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    festival = festivals.get_festival(db, membership.festival_id)
+    edition = festivals.current_edition(db, festival.id)
+    categories = festivals.categories_for_edition(db, edition.id) if edition else []
+    waiver_through = None
+    if festival.deadline_waiver_days > 0:
+        base = edition.closes_on if edition else None
+        if base is None:
+            past = festivals.waiver_window_edition(db, festival.id)
+            base = past.closes_on if past else None
+        if base:
+            waiver_through = (
+                base + timedelta(days=festival.deadline_waiver_days)
+            ).isoformat()
+    return {
+        "codes": [
+            {
+                "id": c.id,
+                "code": c.code,
+                "code_type": c.code_type.value,
+                "label": c.label,
+                "kind": c.kind.value,
+                "amount": c.amount,
+                "category_id": c.category_id,
+                "valid_from": c.valid_from.isoformat() if c.valid_from else None,
+                "valid_to": c.valid_to.isoformat() if c.valid_to else None,
+                "redemption_limit": c.redemption_limit,
+                "redemptions": c.redemptions,
+                "also_deadline_waiver": c.also_deadline_waiver,
+                "one_use_per_submitter": c.one_use_per_submitter,
+            }
+            for c in discounts.list_codes(db, membership.festival_id)
+        ],
+        "categories": [{"id": c.id, "name": c.name} for c in categories],
+        "deadline_waiver_days": festival.deadline_waiver_days,
+        "waiver_accepted_through": waiver_through,
+    }
+
+
+@router.post("/codes", status_code=201)
+def create_code(db: DbDep, user: OrganizerDep, body: CodeIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        dc = discounts.create_code(
+            db, membership.festival_id,
+            code=body.code,
+            code_type=body.code_type,
+            label=body.label,
+            kind=body.kind,
+            amount=body.amount,
+            category_id=body.category_id,
+            valid_from=body.valid_from,
+            valid_to=body.valid_to,
+            redemption_limit=body.redemption_limit,
+            also_deadline_waiver=body.also_deadline_waiver,
+            one_use_per_submitter=body.one_use_per_submitter,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": dc.id, "code": dc.code}
+
+
+@router.delete("/codes/{code_id}")
+def delete_code(db: DbDep, user: OrganizerDep, code_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        discounts.delete_code(db, code_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/queue")
+def my_queue(db: DbDep, user: OrganizerDep):
+    """The signed-in staff member's review queue (pending assignments)."""
+    membership = _membership(db, user)
+    rows = []
+    for assignment in jury.queue_for_juror(db, user.id):
+        sub = submissions.get_submission(db, assignment.submission_id)
+        if sub is None or sub.festival_id != membership.festival_id:
+            continue
+        film = accounts.get_film(db, sub.film_id)
+        rows.append({
+            "submission_id": sub.id,
+            "tracking_number": sub.tracking_number,
+            "film_title": film.title,
+            "status": assignment.status.value,
+        })
+    return {"queue": rows}
 
 
 def _own_submission(db, membership, submission_id: int):
@@ -226,9 +455,89 @@ def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
         ],
         "statuses": [s.value for s in SubmissionStatus],
         "can_update": membership.role in STATUS_ROLES,
+        "can_rate": membership.role in RATING_ROLES,
         "prev_id": prev_id,
         "next_id": next_id,
+        **_judging_payload(db, membership, sub, user),
     }
+
+
+def _judging_payload(db, membership, sub, user) -> dict:
+    """Judges, rubric, my scores, and the aggregate rating for one submission."""
+    staff = accounts.festival_staff(db, membership.festival_id)
+    names = {u.id: u.display_name for _, u in staff}
+    assignments = jury.assignments_for_submission(db, sub.id)
+    criteria = jury.criteria_for_festival(db, membership.festival_id)
+    average, judge_count = jury.rating_summary(db, sub.id, criteria)
+    my_assignment = next((a for a in assignments if a.juror_user_id == user.id), None)
+    return {
+        "judges": [
+            {
+                "user_id": a.juror_user_id,
+                "name": names.get(a.juror_user_id, "former staff"),
+                "status": a.status.value,
+            }
+            for a in assignments
+        ],
+        "staff": [
+            {"user_id": u.id, "display_name": u.display_name, "role": m.role.value}
+            for m, u in staff
+        ],
+        "rubric": [
+            {"id": c.id, "name": c.name, "weight": c.weight} for c in criteria
+        ],
+        "my_scores": (
+            jury.scores_for_assignment(db, my_assignment.id) if my_assignment else {}
+        ),
+        "rating": {"average": average, "judges": judge_count},
+    }
+
+
+@router.post("/submissions/{submission_id}/assign")
+def assign_judge(db: DbDep, user: OrganizerDep, submission_id: int, body: AssignIn):
+    membership = _membership(db, user)
+    if membership.role not in STATUS_ROLES:
+        raise HTTPException(403, "Your role can't assign judges.")
+    _own_submission(db, membership, submission_id)
+    staff_ids = {u.id for _, u in accounts.festival_staff(db, membership.festival_id)}
+    if body.user_id not in staff_ids:
+        raise HTTPException(400, "That person isn't on this festival's staff.")
+    jury.assign(db, submission_id, body.user_id)
+    return {"ok": True}
+
+
+@router.post("/submissions/{submission_id}/unassign")
+def unassign_judge(db: DbDep, user: OrganizerDep, submission_id: int, body: AssignIn):
+    membership = _membership(db, user)
+    if membership.role not in STATUS_ROLES:
+        raise HTTPException(403, "Your role can't assign judges.")
+    _own_submission(db, membership, submission_id)
+    jury.unassign(db, submission_id, body.user_id)
+    return {"ok": True}
+
+
+@router.post("/submissions/{submission_id}/rate")
+def rate_submission(db: DbDep, user: OrganizerDep, submission_id: int, body: RateIn):
+    membership = _membership(db, user)
+    if membership.role not in RATING_ROLES:
+        raise HTTPException(403, "Your role can't rate submissions.")
+    _own_submission(db, membership, submission_id)
+    criteria = {
+        c.id for c in jury.criteria_for_festival(db, membership.festival_id)
+    }
+    scores = {}
+    for item in body.scores:
+        if item.criterion_id not in criteria:
+            raise HTTPException(400, "Unknown rubric criterion.")
+        if not 1 <= item.score <= 10:
+            raise HTTPException(400, "Scores are 1–10.")
+        scores[item.criterion_id] = item.score
+    if not scores:
+        raise HTTPException(400, "No scores given.")
+    # Rating implies an assignment; create one if the rater wasn't assigned.
+    assignment = jury.assign(db, submission_id, user.id)
+    jury.record_scores(db, assignment.id, scores)
+    return {"ok": True}
 
 
 @router.post("/submissions/{submission_id}/notes", status_code=201)

@@ -343,6 +343,202 @@ def test_submission_detail_with_log_and_notes(client):
     assert data["prev_id"] is None and data["next_id"] is None
 
 
+def test_jury_assignment_and_rating(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    film_id = client.post("/api/films", json={
+        "title": "Rated Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    }).json()["film"]["id"]
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+    }).json()["submission"]["id"]
+
+    # Owner (user 2) with a jury member (user 3)
+    client.post("/api/auth/register", json={
+        "email": "owner@example.com", "password": "password123",
+        "display_name": "Owner", "kind": "organizer",
+    })
+    client.post("/api/auth/register", json={
+        "email": "juror@example.com", "password": "password123",
+        "display_name": "Juror", "kind": "organizer",
+    })
+    from app.db import SessionLocal
+    from app.modules.accounts.models import FestivalMembership, OrgRole
+    db = SessionLocal()
+    db.add(FestivalMembership(user_id=2, festival_id=1, role=OrgRole.OWNER))
+    db.commit()
+    db.close()
+
+    client.post("/api/auth/login", json={
+        "email": "owner@example.com", "password": "password123",
+    })
+    # Owner builds a rubric and adds the juror as staff
+    assert client.post("/api/festival/rubric", json={
+        "name": "Storytelling", "weight": 2,
+    }).status_code == 201
+    crit2 = client.post("/api/festival/rubric", json={"name": "Craft"}).json()["id"]
+    assert client.post("/api/festival/staff", json={
+        "email": "juror@example.com", "role": "jury",
+    }).status_code == 201
+    # Duplicate staff rejected
+    assert client.post("/api/festival/staff", json={
+        "email": "juror@example.com", "role": "jury",
+    }).status_code == 400
+
+    # Assign the juror (user 3)
+    assert client.post(f"/api/festival/submissions/{sub_id}/assign", json={
+        "user_id": 3,
+    }).status_code == 200
+
+    # Juror sees the queue and rates
+    client.post("/api/auth/login", json={
+        "email": "juror@example.com", "password": "password123",
+    })
+    queue = client.get("/api/festival/queue").json()["queue"]
+    assert len(queue) == 1 and queue[0]["film_title"] == "Rated Film"
+    rubric = client.get("/api/festival/rubric").json()["criteria"]
+    assert client.post(f"/api/festival/submissions/{sub_id}/rate", json={
+        "scores": [
+            {"criterion_id": rubric[0]["id"], "score": 9},
+            {"criterion_id": crit2, "score": 6},
+        ],
+    }).status_code == 200
+
+    # Weighted average: (9*2 + 6*1) / 3 = 8.0
+    detail = client.get(f"/api/festival/submissions/{sub_id}").json()
+    assert detail["rating"] == {"average": 8.0, "judges": 1}
+    assert detail["judges"][0]["name"] == "Juror"
+    assert detail["judges"][0]["status"] == "done"
+
+    # Rating appears in the dashboard list; queue is now clear
+    dash = client.get("/api/festival/dashboard").json()
+    assert dash["submissions"][0]["rating"] == 8.0
+    assert client.get("/api/festival/queue").json()["queue"] == []
+
+    # Jury role can't change judging status or manage staff
+    assert client.post(f"/api/festival/submissions/{sub_id}/status", json={
+        "status": "selected",
+    }).status_code == 403
+    assert client.post("/api/festival/staff", json={
+        "email": "p@example.com", "role": "viewer",
+    }).status_code == 403
+
+
+def _make_owner(client, email="codeowner@example.com"):
+    client.post("/api/auth/register", json={
+        "email": email, "password": "password123",
+        "display_name": "Code Owner", "kind": "organizer",
+    })
+    from app.db import SessionLocal
+    from app.modules.accounts.models import FestivalMembership, OrgRole, User
+    from sqlalchemy import select
+    db = SessionLocal()
+    user = db.scalar(select(User).where(User.email == email))
+    db.add(FestivalMembership(user_id=user.id, festival_id=1, role=OrgRole.OWNER))
+    db.commit()
+    db.close()
+
+
+def test_discount_and_waiver_codes(client):
+    _seed_festival()
+    _make_owner(client)
+
+    # Owner creates a fee-waiver code limited to one use per submitter
+    resp = client.post("/api/festival/codes", json={
+        "code": "outreach26", "code_type": "fee_waiver",
+        "label": "Outreach", "one_use_per_submitter": True,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["code"] == "OUTREACH26"
+    # Duplicate rejected; bad percent rejected
+    assert client.post("/api/festival/codes", json={
+        "code": "OUTREACH26", "code_type": "fee_waiver",
+    }).status_code == 400
+    assert client.post("/api/festival/codes", json={
+        "code": "BADPCT", "code_type": "discount", "kind": "percent", "amount": 150,
+    }).status_code == 400
+
+    # Filmmaker uses the waiver: fee becomes 0
+    _register_filmmaker(client, email="w@example.com")
+    film_id = client.post("/api/films", json={
+        "title": "Waived Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    }).json()["film"]["id"]
+    resp = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "discount_code": "OUTREACH26",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["submission"]["fee_paid_cents"] == 0
+
+    # One-use-per-submitter: same filmmaker can't use it again
+    film2 = client.post("/api/films", json={
+        "title": "Second Film", "genre": "documentary",
+        "runtime_minutes": 22, "year": date.today().year,
+    }).json()["film"]["id"]
+    resp = client.post("/api/submissions", json={
+        "film_id": film2, "festival_id": 1, "category_id": 1,
+        "discount_code": "OUTREACH26",
+    })
+    assert resp.status_code == 400
+
+
+def test_deadline_waiver_flow(client):
+    # Festival whose edition closed 3 days ago, with a 14-day waiver window
+    db = SessionLocal()
+    today = date.today()
+    fest = Festival(name="Closed Fest", slug="closed-fest", deadline_waiver_days=14)
+    db.add(fest)
+    db.flush()
+    edition = FestivalEdition(
+        festival_id=fest.id, label="2026",
+        opens_on=today - timedelta(days=90), closes_on=today - timedelta(days=3),
+    )
+    db.add(edition)
+    db.flush()
+    db.add(Category(
+        edition_id=edition.id, name="Short Film",
+        min_runtime_minutes=1, max_runtime_minutes=40, base_fee_cents=3000,
+    ))
+    db.add(DeadlineTier(
+        edition_id=edition.id, name="Late",
+        deadline=today - timedelta(days=3), fee_delta_cents=1500,
+    ))
+    db.commit()
+    db.close()
+
+    _make_owner(client)
+    client.post("/api/festival/codes", json={
+        "code": "LATEPASS", "code_type": "deadline_waiver",
+    })
+
+    _register_filmmaker(client, email="late@example.com")
+    film_id = client.post("/api/films", json={
+        "title": "Late Film", "genre": "drama",
+        "runtime_minutes": 15, "year": today.year,
+    }).json()["film"]["id"]
+
+    # Without a waiver code: rejected
+    resp = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+    })
+    assert resp.status_code == 400
+    assert "deadline waiver" in resp.json()["detail"]
+
+    # Options endpoint flags the waiver window
+    resp = client.get(f"/api/submissions/options?film={film_id}&festival=1")
+    assert resp.json()["waiver_required"] is True
+
+    # With the code: accepted at the late-tier fee (3000 + 1500)
+    resp = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "discount_code": "LATEPASS",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["submission"]["fee_paid_cents"] == 4500
+
+
 def test_festival_dashboard_requires_organizer(client):
     _register_filmmaker(client)
     resp = client.get("/api/festival/dashboard")
