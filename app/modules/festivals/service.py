@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 from app.modules.festivals.models import (
     Category,
     CategoryKind,
+    CustomQuestion,
     DeadlineTier,
     Festival,
     FestivalEdition,
+    FlagDef,
     HistoricalSelection,
+    QuestionType,
 )
 
 # Festival profile fields organizers may edit through update_profile.
@@ -145,6 +148,98 @@ def eligible_category(
     if category.min_production_year and year < category.min_production_year:
         return False
     return True
+
+
+def list_questions(db: Session, festival_id: int) -> list[CustomQuestion]:
+    return list(
+        db.scalars(
+            select(CustomQuestion)
+            .where(CustomQuestion.festival_id == festival_id)
+            .order_by(CustomQuestion.position, CustomQuestion.id)
+        )
+    )
+
+
+def questions_for_category(
+    db: Session, festival_id: int, category_id: int
+) -> list[CustomQuestion]:
+    """Questions a submitter must answer for this category (all-category
+    questions plus category-specific ones)."""
+    return [
+        q for q in list_questions(db, festival_id)
+        if q.category_id is None or q.category_id == category_id
+    ]
+
+
+def add_question(
+    db: Session,
+    festival_id: int,
+    *,
+    field_type: QuestionType,
+    question: str,
+    options: str = "",
+    category_id: int | None = None,
+) -> CustomQuestion:
+    question = question.strip()
+    if not question:
+        raise ValueError("The question needs a title.")
+    if field_type == QuestionType.DROPDOWN:
+        cleaned = [o.strip() for o in options.split("\n") if o.strip()]
+        if len(cleaned) < 2:
+            raise ValueError("Dropdown questions need at least two options.")
+        options = "\n".join(cleaned)
+    else:
+        options = ""
+    row = CustomQuestion(
+        festival_id=festival_id,
+        field_type=field_type,
+        question=question,
+        options=options,
+        category_id=category_id,
+        position=len(list_questions(db, festival_id)),
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def delete_question(db: Session, question_id: int, festival_id: int) -> None:
+    q = db.get(CustomQuestion, question_id)
+    if q is None or q.festival_id != festival_id:
+        raise ValueError("Question not found.")
+    db.delete(q)
+    db.commit()
+
+
+def list_flags(db: Session, festival_id: int) -> list[FlagDef]:
+    return list(
+        db.scalars(
+            select(FlagDef)
+            .where(FlagDef.festival_id == festival_id)
+            .order_by(FlagDef.position, FlagDef.id)
+        )
+    )
+
+
+def add_flag(db: Session, festival_id: int, name: str, color: str) -> FlagDef:
+    name = name.strip()
+    if not name:
+        raise ValueError("The flag needs a name.")
+    flag = FlagDef(
+        festival_id=festival_id, name=name, color=color,
+        position=len(list_flags(db, festival_id)),
+    )
+    db.add(flag)
+    db.commit()
+    return flag
+
+
+def delete_flag(db: Session, flag_id: int, festival_id: int) -> None:
+    flag = db.get(FlagDef, flag_id)
+    if flag is None or flag.festival_id != festival_id:
+        raise ValueError("Flag not found.")
+    db.delete(flag)
+    db.commit()
 
 
 def ingest_historical_selection(

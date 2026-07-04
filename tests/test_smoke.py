@@ -539,6 +539,94 @@ def test_deadline_waiver_flow(client):
     assert resp.json()["submission"]["fee_paid_cents"] == 4500
 
 
+def test_custom_form_flags_messages_insights(client):
+    _seed_festival()
+    _make_owner(client, email="owner6@example.com")
+
+    # Custom submission form: a yes/no and a dropdown question
+    q1 = client.post("/api/festival/questions", json={
+        "field_type": "yes_no", "question": "Did you attend film school?",
+    }).json()["id"]
+    q2 = client.post("/api/festival/questions", json={
+        "field_type": "dropdown", "question": "How did you hear about us?",
+        "options": "Instagram\nA friend\nOther",
+    }).json()["id"]
+    # Dropdown with < 2 options rejected
+    assert client.post("/api/festival/questions", json={
+        "field_type": "dropdown", "question": "Bad", "options": "Only one",
+    }).status_code == 400
+
+    # Flags + default judging form
+    flag_id = client.post("/api/festival/flags", json={
+        "name": "Strong contender", "color": "#2E7D46",
+    }).json()["id"]
+    assert client.post("/api/festival/rubric/defaults", json={}).status_code == 201
+    rubric = client.get("/api/festival/rubric").json()["criteria"]
+    assert len(rubric) == 9  # standard film judging form
+
+    # Filmmaker submits: missing answers rejected, wrong dropdown rejected
+    _register_filmmaker(client, email="q@example.com")
+    film_id = client.post("/api/films", json={
+        "title": "Answered Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    }).json()["film"]["id"]
+    assert client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+    }).status_code == 400
+    assert client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "answers": {str(q1): "Yes", str(q2): "Not an option"},
+    }).status_code == 400
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "answers": {str(q1): "Yes", str(q2): "Instagram"},
+    }).json()["submission"]["id"]
+
+    # Owner: flag it, rate with comment + recommendation, read the detail
+    client.post("/api/auth/login", json={
+        "email": "owner6@example.com", "password": "password123",
+    })
+    assert client.post(f"/api/festival/submissions/{sub_id}/flag", json={
+        "flag_id": flag_id,
+    }).status_code == 200
+    client.post(f"/api/festival/submissions/{sub_id}/rate", json={
+        "scores": [{"criterion_id": rubric[0]["id"], "score": 8}],
+        "comment": "Lovely opening.", "recommendation": "recommend",
+    })
+    detail = client.get(f"/api/festival/submissions/{sub_id}").json()
+    answers = {a["question"]: a["answer"] for a in detail["custom_answers"]}
+    assert answers["Did you attend film school?"] == "Yes"
+    assert detail["submission"]["flag_id"] == flag_id
+    assert detail["judges"][0]["recommendation"] == "recommend"
+    assert detail["judges"][0]["comment"] == "Lovely opening."
+
+    # Flag shows in the dashboard list
+    dash = client.get("/api/festival/dashboard").json()
+    assert dash["submissions"][0]["flag"]["name"] == "Strong contender"
+
+    # Insights: one judge, 1/1 judged
+    insights = client.get("/api/festival/insights").json()
+    assert insights["totals"] == {
+        "judges": 1, "submissions": 1, "judged": 1, "not_judged": 0, "pct_judged": 100,
+    }
+    assert insights["judges"][0]["runtime_minutes_assigned"] == 20
+
+    # Bulk message to submitters lands in the filmmaker's notifications
+    resp = client.post("/api/festival/messages", json={
+        "audience": "submitters", "subject": "Screening date announced",
+        "body": "Join us on the 16th!",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["recipient_count"] == 1
+    assert len(client.get("/api/festival/messages").json()["messages"]) == 1
+
+    client.post("/api/auth/login", json={
+        "email": "q@example.com", "password": "password123",
+    })
+    notes = client.get("/api/submissions").json()["notifications"]
+    assert any("Screening date announced" in n["subject"] for n in notes)
+
+
 def test_festival_dashboard_requires_organizer(client):
     _register_filmmaker(client)
     resp = client.get("/api/festival/dashboard")

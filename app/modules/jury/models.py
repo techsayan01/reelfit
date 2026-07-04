@@ -17,6 +17,15 @@ class AssignmentStatus(str, enum.Enum):
     DONE = "done"
 
 
+class Recommendation(str, enum.Enum):
+    """Judge's overall recommendation, alongside rubric scores."""
+
+    PASS = "pass"
+    MAYBE = "maybe"
+    RECOMMEND = "recommend"
+    AWARD_WORTHY = "award_worthy"
+
+
 class RubricCriterion(Base):
     """Festival-configured scoring criterion with weighting (BRD §5.1.3)."""
 
@@ -39,6 +48,11 @@ class JuryAssignment(Base):
     juror_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[AssignmentStatus] = mapped_column(
         Enum(AssignmentStatus), default=AssignmentStatus.PENDING
+    )
+    # Judge's free-form comment and overall recommendation (judging form).
+    comment: Mapped[str] = mapped_column(Text, default="")
+    recommendation: Mapped[Recommendation | None] = mapped_column(
+        Enum(Recommendation), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -58,9 +58,22 @@ class Submission(Base):
     tracking_number: Mapped[str] = mapped_column(String(24), default="", index=True)
     # Optional message from the filmmaker to this festival.
     cover_letter: Mapped[str] = mapped_column(Text, default="")
+    # Festival-side organizational flag (custom flags).
+    flag_id: Mapped[int | None] = mapped_column(ForeignKey("flag_defs.id"), nullable=True)
     relay_contact_id: Mapped[str] = mapped_column(String(60), default=new_relay_id)
     relay_revoked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomAnswer(Base):
+    """A submitter's answer to one of the festival's custom form questions."""
+
+    __tablename__ = "custom_answers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), index=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("custom_questions.id"))
+    answer: Mapped[str] = mapped_column(Text, default="")
 
 
 class StatusChange(Base):

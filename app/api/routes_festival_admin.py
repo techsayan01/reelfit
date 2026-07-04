@@ -13,7 +13,9 @@ from app.modules.dashboards import service as dashboards
 from app.modules.discounts import service as discounts
 from app.modules.discounts.models import CodeType, DiscountKind
 from app.modules.festivals import service as festivals
+from app.modules.festivals.models import QuestionType
 from app.modules.jury import service as jury
+from app.modules.jury.models import Recommendation
 from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.reviews import service as reviews
@@ -59,6 +61,30 @@ class ScoreItem(BaseModel):
 
 class RateIn(BaseModel):
     scores: list[ScoreItem]
+    comment: str = ""
+    recommendation: Recommendation | None = None
+
+
+class QuestionIn(BaseModel):
+    field_type: QuestionType
+    question: str
+    options: str = ""
+    category_id: int | None = None
+
+
+class FlagIn(BaseModel):
+    name: str
+    color: str = "#C0392B"
+
+
+class SetFlagIn(BaseModel):
+    flag_id: int | None = None
+
+
+class MessageIn(BaseModel):
+    audience: str  # "submitters" | "staff"
+    subject: str
+    body: str = ""
 
 
 # Roles allowed to score submissions against the rubric.
@@ -126,13 +152,16 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
         for c in festivals.categories_for_edition(db, e.id)
     }
     criteria = jury.criteria_for_festival(db, membership.festival_id)
+    flags = {f.id: f for f in festivals.list_flags(db, membership.festival_id)}
     sub_rows = []
     for s in subs:
         film = accounts.get_film(db, s.film_id)
         average, judge_count = jury.rating_summary(db, s.id, criteria)
+        flag = flags.get(s.flag_id)
         sub_rows.append({
             "rating": average,
             "rating_judges": judge_count,
+            "flag": {"id": flag.id, "name": flag.name, "color": flag.color} if flag else None,
             "id": s.id,
             "tracking_number": s.tracking_number,
             "film_title": film.title,
@@ -167,6 +196,9 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
             "discounted_count": overview.discounted_count,
         },
         "submissions": sub_rows,
+        "flags": [
+            {"id": f.id, "name": f.name, "color": f.color} for f in flags.values()
+        ],
         "reviews": [
             {
                 "id": r.id,
@@ -270,6 +302,199 @@ def delete_criterion(db: DbDep, user: OrganizerDep, criterion_id: int):
     except ValueError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
+
+
+def _festival_categories(db, festival_id: int) -> list:
+    festival = festivals.get_festival(db, festival_id)
+    return [
+        c for e in festival.editions for c in festivals.categories_for_edition(db, e.id)
+    ]
+
+
+@router.get("/questions")
+def list_questions(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "questions": [
+            {
+                "id": q.id,
+                "field_type": q.field_type.value,
+                "question": q.question,
+                "options": q.options_list(),
+                "category_id": q.category_id,
+            }
+            for q in festivals.list_questions(db, membership.festival_id)
+        ],
+        "categories": [
+            {"id": c.id, "name": c.name}
+            for c in _festival_categories(db, membership.festival_id)
+        ],
+    }
+
+
+@router.post("/questions", status_code=201)
+def add_question(db: DbDep, user: OrganizerDep, body: QuestionIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        q = festivals.add_question(
+            db, membership.festival_id,
+            field_type=body.field_type, question=body.question,
+            options=body.options, category_id=body.category_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": q.id}
+
+
+@router.delete("/questions/{question_id}")
+def delete_question(db: DbDep, user: OrganizerDep, question_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        submissions.delete_answers_for_question(db, question_id)
+        festivals.delete_question(db, question_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/flags")
+def list_flags(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "flags": [
+            {"id": f.id, "name": f.name, "color": f.color}
+            for f in festivals.list_flags(db, membership.festival_id)
+        ]
+    }
+
+
+@router.post("/flags", status_code=201)
+def add_flag(db: DbDep, user: OrganizerDep, body: FlagIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        flag = festivals.add_flag(db, membership.festival_id, body.name, body.color)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": flag.id}
+
+
+@router.delete("/flags/{flag_id}")
+def delete_flag(db: DbDep, user: OrganizerDep, flag_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        submissions.clear_flag(db, flag_id)
+        festivals.delete_flag(db, flag_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.post("/rubric/defaults", status_code=201)
+def add_default_rubric(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    created = jury.add_default_criteria(db, membership.festival_id)
+    return {"created": len(created)}
+
+
+@router.get("/messages")
+def list_messages(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "messages": [
+            {
+                "id": m.id,
+                "audience": m.audience,
+                "subject": m.subject,
+                "recipient_count": m.recipient_count,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in notifications.bulk_messages(db, membership.festival_id)
+        ]
+    }
+
+
+@router.post("/messages", status_code=201)
+def send_message(db: DbDep, user: OrganizerDep, body: MessageIn):
+    """Bulk message to all submitters or all staff (BRD §5.1.4)."""
+    membership = _membership(db, user)
+    if membership.role not in STATUS_ROLES:
+        raise HTTPException(403, "Your role can't send bulk messages.")
+    if body.audience not in ("submitters", "staff"):
+        raise HTTPException(400, "Audience is submitters or staff.")
+    if not body.subject.strip():
+        raise HTTPException(400, "The message needs a subject.")
+    festival = festivals.get_festival(db, membership.festival_id)
+    if body.audience == "submitters":
+        recipient_ids = {
+            accounts.get_film(db, s.film_id).filmmaker_id
+            for s in submissions.submissions_for_festival(db, festival.id)
+        }
+    else:
+        recipient_ids = {
+            u.id for _, u in accounts.festival_staff(db, festival.id) if u.id != user.id
+        }
+    message = notifications.send_bulk(
+        db,
+        festival_id=festival.id,
+        festival_name=festival.name,
+        audience=body.audience,
+        subject=body.subject.strip(),
+        body=body.body.strip(),
+        recipient_user_ids=sorted(recipient_ids),
+    )
+    return {"id": message.id, "recipient_count": message.recipient_count}
+
+
+@router.get("/insights")
+def judging_insights(db: DbDep, user: OrganizerDep):
+    """Per-judge progress: assigned, judged, % judged, runtime assigned."""
+    membership = _membership(db, user)
+    subs = submissions.submissions_for_festival(db, membership.festival_id)
+    films = {s.id: accounts.get_film(db, s.film_id) for s in subs}
+    staff_names = {
+        u.id: u.display_name
+        for _, u in accounts.festival_staff(db, membership.festival_id)
+    }
+
+    per_judge: dict[int, dict] = {}
+    judged_submissions: set[int] = set()
+    for s in subs:
+        for a in jury.assignments_for_submission(db, s.id):
+            row = per_judge.setdefault(a.juror_user_id, {
+                "assigned": 0, "judged": 0, "runtime_minutes": 0,
+            })
+            row["assigned"] += 1
+            row["runtime_minutes"] += films[s.id].runtime_minutes or 0
+            if a.status.value == "done":
+                row["judged"] += 1
+                judged_submissions.add(s.id)
+
+    judges = [
+        {
+            "user_id": user_id,
+            "name": staff_names.get(user_id, "former staff"),
+            "assigned": row["assigned"],
+            "judged": row["judged"],
+            "pct_judged": round(100 * row["judged"] / row["assigned"]) if row["assigned"] else 0,
+            "runtime_minutes_assigned": row["runtime_minutes"],
+        }
+        for user_id, row in sorted(per_judge.items())
+    ]
+    return {
+        "totals": {
+            "judges": len(per_judge),
+            "submissions": len(subs),
+            "judged": len(judged_submissions),
+            "not_judged": len(subs) - len(judged_submissions),
+            "pct_judged": round(100 * len(judged_submissions) / len(subs)) if subs else 0,
+        },
+        "judges": judges,
+    }
 
 
 @router.get("/codes")
@@ -414,7 +639,13 @@ def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
             "cover_letter": sub.cover_letter,
             "contact": "access revoked" if sub.relay_revoked else sub.relay_contact_id,
             "created_at": sub.created_at.isoformat(),
+            "flag_id": sub.flag_id,
         },
+        "flags": [
+            {"id": f.id, "name": f.name, "color": f.color}
+            for f in festivals.list_flags(db, membership.festival_id)
+        ],
+        "custom_answers": _custom_answers(db, membership.festival_id, sub.id),
         "film": {
             "title": film.title,
             "kind": film.kind.value,
@@ -462,6 +693,14 @@ def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
     }
 
 
+def _custom_answers(db, festival_id: int, submission_id: int) -> list[dict]:
+    questions = {q.id: q.question for q in festivals.list_questions(db, festival_id)}
+    return [
+        {"question": questions.get(a.question_id, "(removed question)"), "answer": a.answer}
+        for a in submissions.answers_for_submission(db, submission_id)
+    ]
+
+
 def _judging_payload(db, membership, sub, user) -> dict:
     """Judges, rubric, my scores, and the aggregate rating for one submission."""
     staff = accounts.festival_staff(db, membership.festival_id)
@@ -476,9 +715,17 @@ def _judging_payload(db, membership, sub, user) -> dict:
                 "user_id": a.juror_user_id,
                 "name": names.get(a.juror_user_id, "former staff"),
                 "status": a.status.value,
+                "recommendation": a.recommendation.value if a.recommendation else None,
+                "comment": a.comment,
             }
             for a in assignments
         ],
+        "my_comment": my_assignment.comment if my_assignment else "",
+        "my_recommendation": (
+            my_assignment.recommendation.value
+            if my_assignment and my_assignment.recommendation
+            else None
+        ),
         "staff": [
             {"user_id": u.id, "display_name": u.display_name, "role": m.role.value}
             for m, u in staff
@@ -536,7 +783,24 @@ def rate_submission(db: DbDep, user: OrganizerDep, submission_id: int, body: Rat
         raise HTTPException(400, "No scores given.")
     # Rating implies an assignment; create one if the rater wasn't assigned.
     assignment = jury.assign(db, submission_id, user.id)
-    jury.record_scores(db, assignment.id, scores)
+    jury.record_scores(
+        db, assignment.id, scores,
+        comment=body.comment, recommendation=body.recommendation,
+    )
+    return {"ok": True}
+
+
+@router.post("/submissions/{submission_id}/flag")
+def set_flag(db: DbDep, user: OrganizerDep, submission_id: int, body: SetFlagIn):
+    membership = _membership(db, user)
+    if membership.role not in STATUS_ROLES:
+        raise HTTPException(403, "Your role can't set flags.")
+    _own_submission(db, membership, submission_id)
+    if body.flag_id is not None:
+        flags = {f.id for f in festivals.list_flags(db, membership.festival_id)}
+        if body.flag_id not in flags:
+            raise HTTPException(400, "That flag doesn't exist.")
+    submissions.set_flag(db, submission_id, body.flag_id)
     return {"ok": True}
 
 

@@ -13,7 +13,13 @@ from app.modules.festivals import service as festivals
 from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.payments import service as payments
-from app.modules.submissions.models import StatusChange, Submission, SubmissionStatus
+from app.modules.festivals.models import QuestionType
+from app.modules.submissions.models import (
+    CustomAnswer,
+    StatusChange,
+    Submission,
+    SubmissionStatus,
+)
 
 
 class SubmissionError(Exception):
@@ -33,6 +39,7 @@ def create_submission(
     category_id: int,
     discount_code: str = "",
     cover_letter: str = "",
+    answers: dict[int, str] | None = None,
 ) -> Submission:
     festival = festivals.get_festival(db, festival_id)
     if festival is None:
@@ -80,6 +87,18 @@ def create_submission(
     if existing:
         raise SubmissionError("This film is already submitted to that category.")
 
+    # Custom submission form: every applicable question needs an answer.
+    answers = answers or {}
+    questions = festivals.questions_for_category(db, festival_id, category_id)
+    for q in questions:
+        answer = (answers.get(q.id) or "").strip()
+        if not answer:
+            raise SubmissionError(f"Please answer: “{q.question}”")
+        if q.field_type == QuestionType.DROPDOWN and answer not in q.options_list():
+            raise SubmissionError(f"Pick one of the options for “{q.question}”.")
+        if q.field_type == QuestionType.YES_NO and answer not in ("Yes", "No"):
+            raise SubmissionError(f"Answer yes or no to “{q.question}”.")
+
     tier = festivals.active_deadline_tier(db, edition.id)
     if tier is None and late_entry:
         # Late entries pay the final (most expensive) tier.
@@ -115,6 +134,13 @@ def create_submission(
     )
     db.add(submission)
     db.flush()
+
+    for q in questions:
+        db.add(CustomAnswer(
+            submission_id=submission.id,
+            question_id=q.id,
+            answer=answers[q.id].strip(),
+        ))
 
     if fee > 0:
         payments.record_submission_fee(db, filmmaker_id, submission.id, fee)
@@ -185,6 +211,37 @@ def status_log(db: Session, submission_id: int) -> list[StatusChange]:
 
 def get_submission(db: Session, submission_id: int) -> Submission | None:
     return db.get(Submission, submission_id)
+
+
+def answers_for_submission(db: Session, submission_id: int) -> list[CustomAnswer]:
+    return list(
+        db.scalars(
+            select(CustomAnswer).where(CustomAnswer.submission_id == submission_id)
+        )
+    )
+
+
+def delete_answers_for_question(db: Session, question_id: int) -> None:
+    for a in db.scalars(
+        select(CustomAnswer).where(CustomAnswer.question_id == question_id)
+    ):
+        db.delete(a)
+    db.commit()
+
+
+def set_flag(db: Session, submission_id: int, flag_id: int | None) -> None:
+    submission = db.get(Submission, submission_id)
+    if submission is None:
+        raise SubmissionError("Submission not found.")
+    submission.flag_id = flag_id
+    db.commit()
+
+
+def clear_flag(db: Session, flag_id: int) -> None:
+    """Unset a flag from every submission before its definition is deleted."""
+    for s in db.scalars(select(Submission).where(Submission.flag_id == flag_id)):
+        s.flag_id = None
+    db.commit()
 
 
 def revoke_relay(db: Session, submission_id: int, filmmaker_id: int) -> None:

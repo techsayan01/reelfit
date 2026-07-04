@@ -4,6 +4,15 @@ import { api, money } from "../api.js";
 
 const label = (s) => s.replaceAll("_", " ");
 
+const RECOMMENDATIONS = [
+  ["pass", "👎 Pass"],
+  ["maybe", "? Maybe"],
+  ["recommend", "👍 Recommend"],
+  ["award_worthy", "🏆 Award worthy"],
+];
+const recLabel = (value) =>
+  RECOMMENDATIONS.find(([v]) => v === value)?.[1] ?? value;
+
 /** Convert a YouTube/Vimeo watch URL into an embeddable player URL. */
 function embedUrl(url) {
   if (!url) return null;
@@ -69,6 +78,15 @@ function JudgesCard({ data, submissionId, onChanged, onError }) {
               <span className={`tag ${j.status === "done" ? "tag-validated" : "tag-status"}`}>
                 {j.status === "done" ? "scored" : label(j.status)}
               </span>
+              {j.recommendation && (
+                <span className="tag tag-selected"> {recLabel(j.recommendation)}</span>
+              )}
+              {j.comment && (
+                <>
+                  <br />
+                  <span className="muted" style={{ fontSize: "0.9rem" }}>“{j.comment}”</span>
+                </>
+              )}
             </span>
             {can_update && (
               <button className="btn btn-quiet" onClick={() => unassign(j.user_id)}>
@@ -99,10 +117,13 @@ function RatingCard({ data, submissionId, onChanged, onError }) {
   const {
     rubric = [],
     my_scores = {},
+    my_comment = "",
+    my_recommendation = null,
     rating = { average: null, judges: 0 },
     can_rate,
   } = data;
   const [open, setOpen] = useState(false);
+  const [recommendation, setRecommendation] = useState(my_recommendation);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -113,7 +134,11 @@ function RatingCard({ data, submissionId, onChanged, onError }) {
     try {
       await api(`/api/festival/submissions/${submissionId}/rate`, {
         method: "POST",
-        body: { scores },
+        body: {
+          scores,
+          comment: form.get("comment") || "",
+          recommendation,
+        },
       });
       setOpen(false);
       onChanged();
@@ -161,6 +186,29 @@ function RatingCard({ data, submissionId, onChanged, onError }) {
               </select>
             </div>
           ))}
+
+          <label htmlFor="rate-comment">Comment (optional)</label>
+          <textarea
+            id="rate-comment"
+            name="comment"
+            defaultValue={my_comment}
+            placeholder="Convey more than the star ratings — what stood out?"
+          />
+
+          <label>Recommendation</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {RECOMMENDATIONS.map(([value, text]) => (
+              <button
+                key={value}
+                type="button"
+                className={recommendation === value ? "btn btn-primary" : "btn btn-secondary"}
+                onClick={() => setRecommendation(value)}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+
           <div className="btn-row">
             <button className="btn btn-primary" type="submit">Save scores</button>
             <button className="btn btn-quiet" type="button" onClick={() => setOpen(false)}>
@@ -214,7 +262,24 @@ export default function FestivalSubmissionDetail() {
   if (error && !data) return <p className="form-error">{error}</p>;
   if (!data) return <p className="center-note">Loading…</p>;
 
-  const { submission, film, filmmaker, status_log, notes, statuses, can_update, prev_id, next_id } = data;
+  const {
+    submission, film, filmmaker, status_log, notes, statuses,
+    can_update, prev_id, next_id, custom_answers = [], flags = [],
+  } = data;
+  const tabs = ["overview", "credits", "specifications", "cover letter"];
+  if (custom_answers.length > 0) tabs.push("custom form");
+
+  const setFlag = async (flag_id) => {
+    try {
+      await api(`/api/festival/submissions/${id}/flag`, {
+        method: "POST",
+        body: { flag_id: flag_id ? Number(flag_id) : null },
+      });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   const screener = embedUrl(film.screener_url);
   const trailer = embedUrl(film.trailer_url);
 
@@ -270,7 +335,7 @@ export default function FestivalSubmissionDetail() {
       <div className="two-col">
         <div>
           <div className="tab-row" role="tablist">
-            {["overview", "credits", "specifications", "cover letter"].map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t}
                 role="tab"
@@ -352,6 +417,20 @@ export default function FestivalSubmissionDetail() {
             </div>
           )}
 
+          {tab === "custom form" && (
+            <div className="card">
+              <p className="muted">The submitter's answers to your custom form.</p>
+              <div className="list-divided">
+                {custom_answers.map((a, i) => (
+                  <div key={i}>
+                    <p style={{ margin: 0 }}><strong>{a.question}</strong></p>
+                    <p style={{ margin: 0 }}>{a.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="card">
             <h2>Internal notes</h2>
             <p className="muted">Jury-only — never visible to the filmmaker.</p>
@@ -393,6 +472,21 @@ export default function FestivalSubmissionDetail() {
             )}
             {submission.notified && (
               <p className="muted" style={{ marginTop: 8 }}>✓ filmmaker notified of current status</p>
+            )}
+            {flags.length > 0 && can_update && (
+              <>
+                <label htmlFor="flag">Flag</label>
+                <select
+                  id="flag"
+                  value={submission.flag_id ?? ""}
+                  onChange={(e) => setFlag(e.target.value)}
+                >
+                  <option value="">No flag</option>
+                  {flags.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </>
             )}
           </div>
 

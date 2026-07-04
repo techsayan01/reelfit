@@ -18,6 +18,22 @@ class NotificationKind(str, enum.Enum):
     BULK_MESSAGE = "bulk_message"
 
 
+class BulkMessage(Base):
+    """A bulk email sent by a festival to submitters or staff (BRD §5.1.4).
+    Kept as a log; individual copies land as Notifications (and email in
+    production)."""
+
+    __tablename__ = "bulk_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(index=True)
+    audience: Mapped[str] = mapped_column(String(20))  # "submitters" | "staff"
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text, default="")
+    recipient_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     """In-app notification. Email dispatch mirrors these via the notifications
     service (Postmark/SES relay in production; logged locally in Phase 1 dev)."""

@@ -118,6 +118,47 @@ class DeadlineTier(Base):
     edition: Mapped[FestivalEdition] = relationship(back_populates="deadline_tiers")
 
 
+class QuestionType(str, enum.Enum):
+    TEXT = "text"            # single line answer
+    PARAGRAPH = "paragraph"  # long-form answer
+    DROPDOWN = "dropdown"    # choose one of the configured options
+    YES_NO = "yes_no"
+
+
+class CustomQuestion(Base):
+    """Festival-defined submission form question. Submitters must answer
+    every question that applies to their category (custom submission form)."""
+
+    __tablename__ = "custom_questions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(ForeignKey("festivals.id"), index=True)
+    field_type: Mapped[QuestionType] = mapped_column(
+        Enum(QuestionType), default=QuestionType.TEXT
+    )
+    question: Mapped[str] = mapped_column(String(255))
+    # Dropdown options, one per line. Empty for other field types.
+    options: Mapped[str] = mapped_column(Text, default="")
+    # None = required for all categories; otherwise only for this category.
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    def options_list(self) -> list[str]:
+        return [o.strip() for o in self.options.split("\n") if o.strip()]
+
+
+class FlagDef(Base):
+    """Festival-defined colored flag label for organizing submissions."""
+
+    __tablename__ = "flag_defs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(ForeignKey("festivals.id"), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    color: Mapped[str] = mapped_column(String(20), default="#C0392B")  # hex
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class HistoricalSelection(Base):
     """Past selection outcome used to calibrate the fit-scoring engine (BRD §5.1.3)."""
 

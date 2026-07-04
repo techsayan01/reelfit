@@ -112,10 +112,11 @@ function ProfileEditor({ festival, onSaved, onError }) {
 }
 
 function SubmissionsManager({ data, onStatusChange }) {
-  const { submissions, statuses, can_update } = data;
+  const { submissions, statuses, can_update, flags = [] } = data;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [flagFilter, setFlagFilter] = useState("all");
 
   const categories = useMemo(
     () => [...new Set(submissions.map((s) => s.category).filter(Boolean))],
@@ -125,6 +126,7 @@ function SubmissionsManager({ data, onStatusChange }) {
   const filtered = submissions.filter((s) => {
     if (statusFilter !== "all" && s.status !== statusFilter) return false;
     if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
+    if (flagFilter !== "all" && String(s.flag?.id ?? "") !== flagFilter) return false;
     if (query) {
       const q = query.toLowerCase();
       if (
@@ -170,6 +172,18 @@ function SubmissionsManager({ data, onStatusChange }) {
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
+            {flags.length > 0 && (
+              <select
+                aria-label="Filter by flag"
+                value={flagFilter}
+                onChange={(e) => setFlagFilter(e.target.value)}
+              >
+                <option value="all">All flags</option>
+                {flags.map((f) => (
+                  <option key={f.id} value={String(f.id)}>{f.name}</option>
+                ))}
+              </select>
+            )}
           </div>
           <p className="muted" style={{ fontSize: "0.9rem" }}>
             {filtered.length} submission{filtered.length !== 1 ? "s" : ""} match your criteria
@@ -184,6 +198,10 @@ function SubmissionsManager({ data, onStatusChange }) {
               {filtered.map((s) => (
                 <tr key={s.id}>
                   <td data-label="Project">
+                    {s.flag && (
+                      <span className="flag-dot" style={{ background: s.flag.color }}
+                            title={s.flag.name} />
+                    )}
                     <Link to={`/festival/submissions/${s.id}`}>
                       <strong>{s.film_title}</strong>
                     </Link>
@@ -366,10 +384,26 @@ function RubricCard({ onError }) {
     }
   };
 
+  const addDefaults = async () => {
+    try {
+      await api("/api/festival/rubric/defaults", { method: "POST" });
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
   return (
     <div className="card">
       <h2>Scoring rubric</h2>
       <p className="muted">Judges score each entry 1–10 on these criteria; weights set their importance.</p>
+      {criteria.length === 0 && (
+        <div className="btn-row" style={{ marginTop: 0 }}>
+          <button className="btn btn-secondary" onClick={addDefaults}>
+            Use the standard film judging form
+          </button>
+        </div>
+      )}
       <div className="list-divided">
         {criteria.map((c) => (
           <p key={c.id} style={{ margin: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -388,6 +422,320 @@ function RubricCard({ onError }) {
           <button className="btn btn-secondary" type="submit">Add criterion</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+const FIELD_TYPES = [
+  ["text", "Text (single line answer)"],
+  ["paragraph", "Text (paragraph answer)"],
+  ["dropdown", "Dropdown (choose one)"],
+  ["yes_no", "Yes / No"],
+];
+
+function QuestionsCard({ onError }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [fieldType, setFieldType] = useState("text");
+
+  const load = useCallback(() => {
+    api("/api/festival/questions").then(setData).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    try {
+      await api("/api/festival/questions", {
+        method: "POST",
+        body: {
+          field_type: fieldType,
+          question: fd.get("question"),
+          options: fd.get("options") || "",
+          category_id: fd.get("category_id") ? Number(fd.get("category_id")) : null,
+        },
+      });
+      form.reset();
+      setOpen(false);
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const remove = async (q) => {
+    if (!window.confirm(`Delete “${q.question}”? Existing answers are removed too.`)) return;
+    try {
+      await api(`/api/festival/questions/${q.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  if (!data) return null;
+  const typeLabel = (v) => FIELD_TYPES.find(([t]) => t === v)?.[1] ?? v;
+  const catName = (id) =>
+    data.categories.find((c) => c.id === id)?.name ?? "unknown category";
+
+  return (
+    <div className="card">
+      <h2>Custom submission form</h2>
+      <p className="muted">
+        Submitters must answer these questions when they send you a project.
+        Answers appear on the Custom form tab of each submission.
+      </p>
+      <div className="list-divided">
+        {data.questions.map((q) => (
+          <div key={q.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+            <div>
+              <strong>{q.question}</strong>
+              <br />
+              <span className="muted" style={{ fontSize: "0.9rem" }}>
+                {typeLabel(q.field_type)}
+                {q.category_id !== null ? ` · ${catName(q.category_id)} only` : " · all categories"}
+              </span>
+            </div>
+            <button className="btn btn-quiet" onClick={() => remove(q)}>Delete</button>
+          </div>
+        ))}
+      </div>
+
+      {!open ? (
+        <div className="btn-row">
+          <button className="btn btn-secondary" onClick={() => setOpen(true)}>
+            Add a question
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={add}>
+          <label htmlFor="field_type">Field type</label>
+          <select id="field_type" value={fieldType} onChange={(e) => setFieldType(e.target.value)}>
+            {FIELD_TYPES.map(([value, text]) => (
+              <option key={value} value={value}>{text}</option>
+            ))}
+          </select>
+
+          <label htmlFor="question">Title / question</label>
+          <input id="question" name="question" required placeholder="Ex: Did you attend film school?" />
+
+          {fieldType === "dropdown" && (
+            <>
+              <label htmlFor="options">Options (one per line)</label>
+              <textarea id="options" name="options" required
+                        placeholder={"Instagram\nA friend or colleague\nOther"} />
+            </>
+          )}
+
+          <label htmlFor="q-category">Require for</label>
+          <select id="q-category" name="category_id">
+            <option value="">All categories</option>
+            {data.categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} only</option>
+            ))}
+          </select>
+
+          <div className="btn-row">
+            <button className="btn btn-primary" type="submit">Save question</button>
+            <button className="btn btn-quiet" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+const FLAG_COLORS = [
+  ["#C0392B", "Red"], ["#D4A017", "Yellow"], ["#2E7D46", "Green"],
+  ["#2C5AA0", "Blue"], ["#7D3C98", "Purple"], ["#C2185B", "Pink"],
+  ["#C86A1B", "Orange"], ["#6B6560", "Gray"], ["#1C1917", "Black"],
+];
+
+function FlagsCard({ onError, onChanged }) {
+  const [flags, setFlags] = useState([]);
+  const [color, setColor] = useState(FLAG_COLORS[0][0]);
+
+  const load = useCallback(() => {
+    api("/api/festival/flags").then((d) => setFlags(d.flags)).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    try {
+      await api("/api/festival/flags", {
+        method: "POST",
+        body: { name: new FormData(form).get("name"), color },
+      });
+      form.reset();
+      load();
+      onChanged();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  const remove = async (f) => {
+    if (!window.confirm(`Delete the “${f.name}” flag? It will be cleared from all submissions.`)) return;
+    try {
+      await api(`/api/festival/flags/${f.id}`, { method: "DELETE" });
+      load();
+      onChanged();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Custom flags</h2>
+      <p className="muted">Colored labels to organize submissions your way.</p>
+      <div className="list-divided">
+        {flags.map((f) => (
+          <p key={f.id} style={{ margin: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <span className="flag-dot" style={{ background: f.color }} /> {f.name}
+            </span>
+            <button className="btn btn-quiet" onClick={() => remove(f)}>Delete</button>
+          </p>
+        ))}
+      </div>
+      <form onSubmit={add}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select aria-label="Flag color" value={color} onChange={(e) => setColor(e.target.value)}
+                  style={{ flex: 1, minWidth: 100 }}>
+            {FLAG_COLORS.map(([hex, name]) => (
+              <option key={hex} value={hex}>{name}</option>
+            ))}
+          </select>
+          <input name="name" required placeholder="Flag name" style={{ flex: 2, minWidth: 120 }} />
+        </div>
+        <div className="btn-row">
+          <button className="btn btn-secondary" type="submit">Add flag</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MessagesCard({ onError }) {
+  const [messages, setMessages] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [audience, setAudience] = useState("submitters");
+
+  const load = useCallback(() => {
+    api("/api/festival/messages").then((d) => setMessages(d.messages)).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const send = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    if (!window.confirm(
+      `Send this message to all ${audience}? Each person gets a copy in their notifications.`
+    )) return;
+    try {
+      const res = await api("/api/festival/messages", {
+        method: "POST",
+        body: { audience, subject: fd.get("subject"), body: fd.get("body") || "" },
+      });
+      window.alert(`Sent to ${res.recipient_count} recipient${res.recipient_count !== 1 ? "s" : ""}.`);
+      form.reset();
+      setOpen(false);
+      load();
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Messages</h2>
+      <p className="muted">
+        Bulk messages to your submitters or staff — e.g. a notification-date
+        delay. Not for selection results; those go out automatically with
+        status changes.
+      </p>
+      {!open ? (
+        <div className="btn-row" style={{ marginTop: 0 }}>
+          <button className="btn btn-secondary" onClick={() => setOpen(true)}>
+            Create a new message
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={send}>
+          <label htmlFor="audience">Send to</label>
+          <select id="audience" value={audience} onChange={(e) => setAudience(e.target.value)}>
+            <option value="submitters">All submitters</option>
+            <option value="staff">Judges & staff</option>
+          </select>
+          <label htmlFor="msg-subject">Subject</label>
+          <input id="msg-subject" name="subject" required />
+          <label htmlFor="msg-body">Message</label>
+          <textarea id="msg-body" name="body" />
+          <div className="btn-row">
+            <button className="btn btn-primary" type="submit">Send message</button>
+            <button className="btn btn-quiet" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {messages.length > 0 && (
+        <div className="list-divided" style={{ marginTop: 8 }}>
+          {messages.map((m) => (
+            <p key={m.id} style={{ margin: 0 }}>
+              <strong>{m.subject}</strong>
+              <br />
+              <span className="muted" style={{ fontSize: "0.9rem" }}>
+                {m.audience === "submitters" ? "All submitters" : "Judges & staff"} ({m.recipient_count})
+                {" · "}{new Date(m.created_at).toLocaleDateString()}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InsightsCard() {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    api("/api/festival/insights").then(setData).catch(() => {});
+  }, []);
+
+  if (!data || data.judges.length === 0) return null;
+  const { totals, judges } = data;
+
+  return (
+    <div className="card">
+      <h2>Judging insights</h2>
+      <p className="muted">
+        {totals.judged} of {totals.submissions} submissions judged
+        ({totals.pct_judged}%) across {totals.judges} judge{totals.judges !== 1 ? "s" : ""}.
+      </p>
+      <table className="stack">
+        <thead>
+          <tr><th>Judge</th><th>Judged</th><th>Assigned</th><th>% judged</th><th>Runtime assigned</th></tr>
+        </thead>
+        <tbody>
+          {judges.map((j) => (
+            <tr key={j.user_id}>
+              <td data-label="Judge"><strong>{j.name}</strong></td>
+              <td data-label="Judged">{j.judged}</td>
+              <td data-label="Assigned">{j.assigned}</td>
+              <td data-label="% judged">{j.pct_judged}%</td>
+              <td data-label="Runtime assigned">
+                {Math.floor(j.runtime_minutes_assigned / 60)} hr {j.runtime_minutes_assigned % 60} min
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -690,6 +1038,7 @@ export default function FestivalDashboard() {
       <div className="two-col">
         <div>
           <SubmissionsManager data={data} onStatusChange={updateStatus} />
+          <InsightsCard />
 
           <div className="card">
             <h2>Filmmaker reviews</h2>
@@ -729,6 +1078,9 @@ export default function FestivalDashboard() {
               <ProfileEditor festival={festival} onSaved={load} onError={setError} />
               <StaffCard onError={setError} />
               <RubricCard onError={setError} />
+              <QuestionsCard onError={setError} />
+              <FlagsCard onError={setError} onChanged={load} />
+              <MessagesCard onError={setError} />
               <DiscountsCard onError={setError} />
               <WaiverPeriodCard festival={festival} onSaved={load} onError={setError} />
             </>

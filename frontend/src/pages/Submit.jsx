@@ -24,7 +24,13 @@ export default function Submit() {
   if (error && !options) return <p className="form-error">{error}</p>;
   if (!options) return <p className="center-note">Loading…</p>;
 
-  const { film, festival, edition, tier, categories, waiver_required } = options;
+  const {
+    film, festival, edition, tier, categories, waiver_required,
+    questions = [],
+  } = options;
+  const applicableQuestions = questions.filter(
+    (q) => q.category_id === null || q.category_id === Number(categoryId)
+  );
   const chosen = categories.find((c) => c.id === Number(categoryId));
 
   const onSubmit = async (e) => {
@@ -34,6 +40,10 @@ export default function Submit() {
     setBusy(true);
     setError(null);
     const form = new FormData(e.target);
+    const answers = {};
+    for (const q of applicableQuestions) {
+      answers[q.id] = form.get(`q${q.id}`) || "";
+    }
     try {
       await api("/api/submissions", {
         method: "POST",
@@ -43,6 +53,7 @@ export default function Submit() {
           category_id: Number(categoryId),
           discount_code: form.get("discount_code") || "",
           cover_letter: form.get("cover_letter") || "",
+          answers,
         },
       });
       navigate("/dashboard");
@@ -96,6 +107,38 @@ export default function Submit() {
 
             <label htmlFor="discount_code">Promo code (optional)</label>
             <input id="discount_code" name="discount_code" placeholder="e.g. EARLYBIRD" />
+
+            {applicableQuestions.length > 0 && (
+              <>
+                <h3 style={{ marginTop: 24 }}>A few questions from {festival.name}</h3>
+                {applicableQuestions.map((q) => (
+                  <div key={q.id}>
+                    <label htmlFor={`q${q.id}`}>{q.question}</label>
+                    {q.field_type === "text" && (
+                      <input id={`q${q.id}`} name={`q${q.id}`} required />
+                    )}
+                    {q.field_type === "paragraph" && (
+                      <textarea id={`q${q.id}`} name={`q${q.id}`} required />
+                    )}
+                    {q.field_type === "dropdown" && (
+                      <select id={`q${q.id}`} name={`q${q.id}`} required defaultValue="">
+                        <option value="" disabled>Choose…</option>
+                        {q.options.map((o) => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    )}
+                    {q.field_type === "yes_no" && (
+                      <select id={`q${q.id}`} name={`q${q.id}`} required defaultValue="">
+                        <option value="" disabled>Choose…</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
 
             <label htmlFor="cover_letter">Cover letter (optional)</label>
             <textarea

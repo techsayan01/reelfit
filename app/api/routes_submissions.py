@@ -23,6 +23,7 @@ class SubmissionIn(BaseModel):
     category_id: int
     discount_code: str = ""
     cover_letter: str = ""
+    answers: dict[int, str] = {}
 
 
 def own_submission(db, user, submission_id: int):
@@ -102,6 +103,18 @@ def submission_options(db: DbDep, user: FilmmakerDep, film: int, festival: int):
         "edition": edition_payload(edition),
         "tier": tier_payload(tier),
         "waiver_required": waiver_required,
+        # Custom submission form questions; the client filters by the chosen
+        # category (category_id null = applies to all).
+        "questions": [
+            {
+                "id": q.id,
+                "field_type": q.field_type.value,
+                "question": q.question,
+                "options": q.options_list(),
+                "category_id": q.category_id,
+            }
+            for q in festivals.list_questions(db, fest.id)
+        ],
         "categories": [
             {
                 "id": c.id,
@@ -129,6 +142,7 @@ def create_submission(db: DbDep, user: FilmmakerDep, body: SubmissionIn):
             category_id=body.category_id,
             discount_code=body.discount_code,
             cover_letter=body.cover_letter,
+            answers=body.answers,
         )
     except SubmissionError as exc:
         raise HTTPException(400, str(exc))

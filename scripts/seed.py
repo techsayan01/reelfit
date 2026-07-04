@@ -217,6 +217,7 @@ def seed() -> None:
 
     # Judging rubric for the founder's festival (BRD §5.1.3).
     from app.modules.jury import service as jury_svc
+    from app.modules.jury.models import Recommendation
 
     criteria = {
         name: jury_svc.add_criterion(db, fests[0].id, name, weight)
@@ -225,6 +226,25 @@ def seed() -> None:
             ("Originality", 1.0), ("Festival fit", 1.0),
         )
     }
+
+    # Custom submission form + flags for the founder's festival.
+    from app.modules.festivals.models import QuestionType
+
+    q_school = festivals_svc.add_question(
+        db, fests[0].id, field_type=QuestionType.YES_NO,
+        question="Did you attend film school?",
+    )
+    q_heard = festivals_svc.add_question(
+        db, fests[0].id, field_type=QuestionType.DROPDOWN,
+        question="How did you hear about Hillside?",
+        options="Instagram\nA friend or colleague\nReelfit\nOther",
+    )
+    for flag_name, flag_color in (
+        ("Strong contender", "#2E7D46"),
+        ("Needs discussion", "#D4A017"),
+        ("Rule concern", "#C0392B"),
+    ):
+        festivals_svc.add_flag(db, fests[0].id, flag_name, flag_color)
 
     # Demo submissions to the founder's festival so the submissions manager
     # has content: one under review, one selected.
@@ -250,6 +270,7 @@ def seed() -> None:
                 "screen at Hillside — the festival's documentary focus is "
                 "exactly the audience this film was made for."
             ),
+            answers={q_school.id: "No", q_heard.id: "A friend or colleague"},
         )
         if status != SubmissionStatus.RECEIVED:
             submissions_svc.update_status(db, sub.id, status, actor_user_id=organizer.id)
@@ -257,12 +278,20 @@ def seed() -> None:
         # Assign Divya to judge every entry; she has scored the first one.
         assignment = jury_svc.assign(db, sub.id, juror.id)
         if film is monsoon:
-            jury_svc.record_scores(db, assignment.id, {
-                criteria["Storytelling"].id: 9,
-                criteria["Craft"].id: 8,
-                criteria["Originality"].id: 8,
-                criteria["Festival fit"].id: 9,
-            })
+            jury_svc.record_scores(
+                db, assignment.id,
+                {
+                    criteria["Storytelling"].id: 9,
+                    criteria["Craft"].id: 8,
+                    criteria["Originality"].id: 8,
+                    criteria["Festival fit"].id: 9,
+                },
+                comment="The boat-route sequences are extraordinary — gentle, "
+                        "patient filmmaking that fits our program perfectly.",
+                recommendation=Recommendation.RECOMMEND,
+            )
+            flags = festivals_svc.list_flags(db, hillside.id)
+            submissions_svc.set_flag(db, sub.id, flags[0].id)
 
     print(f"Seeded {len(fests)} festivals and 3 demo accounts (password: reelfit-demo).")
 
