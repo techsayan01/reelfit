@@ -34,6 +34,33 @@ class BulkMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class WebhookEndpoint(Base):
+    """Festival-configured webhook: Reelfit POSTs event JSON to the URL."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(index=True)
+    url: Mapped[str] = mapped_column(String(512))
+    # Comma-separated event names, e.g. "submission.received,submission.status_changed"
+    events: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebhookDelivery(Base):
+    """Log of webhook delivery attempts."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    endpoint_id: Mapped[int] = mapped_column(index=True)
+    event: Mapped[str] = mapped_column(String(60))
+    status_code: Mapped[int | None] = mapped_column(nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     """In-app notification. Email dispatch mirrors these via the notifications
     service (Postmark/SES relay in production; logged locally in Phase 1 dev)."""

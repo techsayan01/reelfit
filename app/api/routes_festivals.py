@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from app.api.deps import DbDep
 from app.modules.dashboards import service as dashboards
@@ -92,11 +93,31 @@ def list_festivals(db: DbDep, q: str = "", region: str = ""):
     return {"festivals": out}
 
 
+@router.get("/{slug}/laurel.svg")
+def public_laurel(db: DbDep, slug: str, text: str = "OFFICIAL SELECTION", variant: str = "black"):
+    """Public laurel download (laurel center) — festivals share this link
+    with their laurel recipients."""
+    from app.modules.certificates import service as certificates
+
+    festival = festivals.get_festival_by_slug(db, slug)
+    if festival is None:
+        raise HTTPException(404, "Festival not found")
+    edition = festivals.current_edition(db, festival.id)
+    label = edition.label if edition else ""
+    svg = certificates.render_laurel_svg(
+        festival.name, label, headline=text,
+        variant="white" if variant == "white" else "black",
+    )
+    return Response(content=svg, media_type="image/svg+xml")
+
+
 @router.get("/{slug}")
-def festival_detail(db: DbDep, slug: str):
+def festival_detail(db: DbDep, slug: str, ref: str = ""):
     festival = festivals.get_festival_by_slug(db, slug)
     if festival is None or not festival.is_public:
         raise HTTPException(404, "Festival not found")
+    # Marketing attribution: every public view is logged with its source.
+    festivals.record_visit(db, festival.id, ref)
     edition = festivals.current_edition(db, festival.id)
     categories = festivals.categories_for_edition(db, edition.id) if edition else []
     tier = festivals.active_deadline_tier(db, edition.id) if edition else None
@@ -144,6 +165,7 @@ def festival_detail(db: DbDep, slug: str):
             }
             for c in categories
         ],
+        "reviews_public": festival.reviews_public,
         "reviews": [
             {
                 "id": r.id,
@@ -153,5 +175,5 @@ def festival_detail(db: DbDep, slug: str):
                 "created_at": r.created_at.isoformat(),
             }
             for r in festival_reviews
-        ],
+        ] if festival.reviews_public else [],
     }

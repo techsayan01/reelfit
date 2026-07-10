@@ -272,6 +272,8 @@ def seed() -> None:
             ),
             answers={q_school.id: "No", q_heard.id: "A friend or colleague"},
         )
+        sub.source = "instagram" if film is monsoon else "direct"
+        db.commit()
         if status != SubmissionStatus.RECEIVED:
             submissions_svc.update_status(db, sub.id, status, actor_user_id=organizer.id)
 
@@ -292,6 +294,11 @@ def seed() -> None:
             )
             flags = festivals_svc.list_flags(db, hillside.id)
             submissions_svc.set_flag(db, sub.id, flags[0].id)
+
+    # Demo traffic for the marketing summary: views by source.
+    for ref, n in (("instagram", 14), ("direct", 9), ("newsletter", 5)):
+        for _ in range(n):
+            festivals_svc.record_visit(db, hillside.id, ref)
 
     print(f"Seeded {len(fests)} festivals and 3 demo accounts (password: reelfit-demo).")
 

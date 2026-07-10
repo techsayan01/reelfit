@@ -60,9 +60,23 @@ class Submission(Base):
     cover_letter: Mapped[str] = mapped_column(Text, default="")
     # Festival-side organizational flag (custom flags).
     flag_id: Mapped[int | None] = mapped_column(ForeignKey("flag_defs.id"), nullable=True)
+    # Marketing attribution: which channel/link brought this submission.
+    source: Mapped[str] = mapped_column(String(60), default="direct")
     relay_contact_id: Mapped[str] = mapped_column(String(60), default=new_relay_id)
     relay_revoked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ExportConfig(Base):
+    """A saved set of columns for submission spreadsheet exports."""
+
+    __tablename__ = "export_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(ForeignKey("festivals.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    # Comma-separated column keys from EXPORT_COLUMNS.
+    columns: Mapped[str] = mapped_column(Text, default="")
 
 
 class CustomAnswer(Base):

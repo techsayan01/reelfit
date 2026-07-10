@@ -1,4 +1,9 @@
+import csv
+import io
+from collections import defaultdict
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -20,7 +25,11 @@ from app.modules.notifications import service as notifications
 from app.modules.notifications.models import NotificationKind
 from app.modules.reviews import service as reviews
 from app.modules.submissions import service as submissions
-from app.modules.submissions.models import SELECTED_STATUSES, SubmissionStatus
+from app.modules.submissions.models import (
+    SELECTED_STATUSES,
+    ExportConfig,
+    SubmissionStatus,
+)
 
 router = APIRouter(prefix="/api/festival", tags=["festival-admin"])
 
@@ -87,6 +96,26 @@ class MessageIn(BaseModel):
     body: str = ""
 
 
+class WebhookIn(BaseModel):
+    url: str
+    events: list[str]
+
+
+class ExportConfigIn(BaseModel):
+    name: str
+    columns: list[str]
+
+
+# Column keys available for submission exports. Contact stays the masked
+# relay — PII never leaves through exports (BRD §7.5).
+EXPORT_COLUMNS = [
+    "tracking_number", "film_title", "project_type", "genre",
+    "runtime_minutes", "year", "country", "language", "category",
+    "status", "fee_paid", "discount_code", "source", "submitted_on",
+    "rating", "contact",
+]
+
+
 # Roles allowed to score submissions against the rubric.
 RATING_ROLES = {OrgRole.OWNER, OrgRole.PROGRAMMER, OrgRole.JURY}
 
@@ -113,6 +142,7 @@ class ProfileIn(BaseModel):
     founded_year: int | None = None
     is_public: bool | None = None
     deadline_waiver_days: int | None = None
+    reviews_public: bool | None = None
 
 
 class CodeIn(BaseModel):
@@ -185,6 +215,7 @@ def festival_dashboard(db: DbDep, user: OrganizerDep):
             **festival_payload(festival),
             "rules": festival.rules,
             "deadline_waiver_days": festival.deadline_waiver_days,
+            "reviews_public": festival.reviews_public,
         },
         "role": membership.role.value,
         "can_edit_profile": membership.role == OrgRole.OWNER,
@@ -495,6 +526,276 @@ def judging_insights(db: DbDep, user: OrganizerDep):
         },
         "judges": judges,
     }
+
+
+def _export_rows(db, membership) -> list[dict]:
+    """One dict per submission with every exportable column."""
+    subs = submissions.submissions_for_festival(db, membership.festival_id)
+    categories = {
+        c.id: c.name for c in _festival_categories(db, membership.festival_id)
+    }
+    criteria = jury.criteria_for_festival(db, membership.festival_id)
+    rows = []
+    for s in subs:
+        film = accounts.get_film(db, s.film_id)
+        average, _ = jury.rating_summary(db, s.id, criteria)
+        rows.append({
+            "tracking_number": s.tracking_number,
+            "film_title": film.title,
+            "project_type": film.kind.value,
+            "genre": film.genre,
+            "runtime_minutes": film.runtime_minutes or "",
+            "year": film.year,
+            "country": film.country,
+            "language": film.language,
+            "category": categories.get(s.category_id, ""),
+            "status": s.status.value,
+            "fee_paid": f"{s.fee_paid_cents / 100:.2f}",
+            "discount_code": s.discount_code,
+            "source": s.source,
+            "submitted_on": s.created_at.date().isoformat(),
+            "rating": average if average is not None else "",
+            "contact": "access revoked" if s.relay_revoked else s.relay_contact_id,
+            "_month": s.created_at.strftime("%B %Y"),
+            "_fee_cents": s.fee_paid_cents,
+        })
+    return rows
+
+
+def _csv_response(filename: str, header: list[str], rows: list[list]) -> Response:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    writer.writerows(rows)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/marketing")
+def marketing_summary(db: DbDep, user: OrganizerDep):
+    """Marketing attribution & conversion analytics (BRD §5.1.5 ★): page
+    views → submissions → conversion rate, by traffic source."""
+    membership = _membership(db, user)
+    visits = festivals.visits_by_ref(db, membership.festival_id)
+    subs = submissions.submissions_for_festival(db, membership.festival_id)
+    sub_counts: dict[str, int] = defaultdict(int)
+    revenue: dict[str, int] = defaultdict(int)
+    for s in subs:
+        sub_counts[s.source] += 1
+        revenue[s.source] += s.fee_paid_cents
+    sources = sorted(set(visits) | set(sub_counts))
+    rows = []
+    for source in sources:
+        v, c = visits.get(source, 0), sub_counts.get(source, 0)
+        rows.append({
+            "source": source,
+            "views": v,
+            "submissions": c,
+            "conversion_pct": round(100 * c / v, 1) if v else None,
+            "revenue_cents": revenue.get(source, 0),
+        })
+    rows.sort(key=lambda r: (-r["submissions"], -r["views"]))
+    festival = festivals.get_festival(db, membership.festival_id)
+    return {
+        "rows": rows,
+        "totals": {
+            "views": sum(visits.values()),
+            "submissions": len(subs),
+            "revenue_cents": sum(s.fee_paid_cents for s in subs),
+        },
+        "share_base": f"/festivals/{festival.slug}?ref=",
+    }
+
+
+@router.get("/transactions")
+def transactions(db: DbDep, user: OrganizerDep):
+    """Monthly ledger of fees collected."""
+    membership = _membership(db, user)
+    rows = _export_rows(db, membership)
+    months: dict[str, dict] = {}
+    for r in rows:
+        m = months.setdefault(r["_month"], {"total_cents": 0, "items": []})
+        m["total_cents"] += r["_fee_cents"]
+        m["items"].append({
+            "tracking_number": r["tracking_number"],
+            "film_title": r["film_title"],
+            "amount_cents": r["_fee_cents"],
+            "date": r["submitted_on"],
+        })
+    return {
+        "months": [
+            {"month": month, **data} for month, data in months.items()
+        ]
+    }
+
+
+@router.get("/reports")
+def create_report(db: DbDep, user: OrganizerDep, report: str = "sales_by_category"):
+    """Aggregate CSV reports (reports builder)."""
+    membership = _membership(db, user)
+    rows = _export_rows(db, membership)
+
+    def aggregate(key: str):
+        agg: dict[str, dict] = defaultdict(lambda: {"count": 0, "cents": 0})
+        for r in rows:
+            bucket = agg[str(r[key]) or "—"]
+            bucket["count"] += 1
+            bucket["cents"] += r["_fee_cents"]
+        return [
+            [name, data["count"], f"{data['cents'] / 100:.2f}"]
+            for name, data in sorted(agg.items())
+        ]
+
+    reports = {
+        "sales_by_category": ("category", "Category"),
+        "sales_by_status": ("status", "Judging status"),
+        "sales_by_month": ("_month", "Month"),
+        "sales_by_source": ("source", "Source"),
+    }
+    if report not in reports:
+        raise HTTPException(400, "Unknown report type.")
+    key, label = reports[report]
+    return _csv_response(
+        f"reelfit-{report}.csv",
+        [label, "Submissions", "Fees (USD)"],
+        aggregate(key),
+    )
+
+
+@router.get("/export-configs")
+def list_export_configs(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    configs = db.scalars(
+        select(ExportConfig).where(ExportConfig.festival_id == membership.festival_id)
+    )
+    return {
+        "configs": [
+            {"id": c.id, "name": c.name, "columns": c.columns.split(",")}
+            for c in configs
+        ],
+        "available_columns": EXPORT_COLUMNS,
+    }
+
+
+@router.post("/export-configs", status_code=201)
+def add_export_config(db: DbDep, user: OrganizerDep, body: ExportConfigIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    columns = [c for c in body.columns if c in EXPORT_COLUMNS]
+    if not body.name.strip() or not columns:
+        raise HTTPException(400, "A configuration needs a name and at least one column.")
+    config = ExportConfig(
+        festival_id=membership.festival_id,
+        name=body.name.strip(),
+        columns=",".join(columns),
+    )
+    db.add(config)
+    db.commit()
+    return {"id": config.id}
+
+
+@router.delete("/export-configs/{config_id}")
+def delete_export_config(db: DbDep, user: OrganizerDep, config_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    config = db.get(ExportConfig, config_id)
+    if config is None or config.festival_id != membership.festival_id:
+        raise HTTPException(404, "Configuration not found.")
+    db.delete(config)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/export")
+def export_submissions(db: DbDep, user: OrganizerDep, config_id: int | None = None):
+    """Submission spreadsheet export, using a saved configuration's columns
+    or every column."""
+    membership = _membership(db, user)
+    columns = EXPORT_COLUMNS
+    if config_id is not None:
+        config = db.get(ExportConfig, config_id)
+        if config is None or config.festival_id != membership.festival_id:
+            raise HTTPException(404, "Configuration not found.")
+        columns = config.columns.split(",")
+    rows = _export_rows(db, membership)
+    return _csv_response(
+        "reelfit-submissions.csv",
+        columns,
+        [[r[c] for c in columns] for r in rows],
+    )
+
+
+@router.get("/webhooks")
+def list_webhooks(db: DbDep, user: OrganizerDep):
+    membership = _membership(db, user)
+    return {
+        "webhooks": [
+            {
+                "id": w.id,
+                "url": w.url,
+                "events": w.events.split(","),
+                "active": w.active,
+                "recent": [
+                    {
+                        "event": d.event,
+                        "ok": d.ok,
+                        "status_code": d.status_code,
+                        "created_at": d.created_at.isoformat(),
+                    }
+                    for d in notifications.recent_deliveries(db, w.id)
+                ],
+            }
+            for w in notifications.list_webhooks(db, membership.festival_id)
+        ],
+        "available_events": list(notifications.WEBHOOK_EVENTS),
+    }
+
+
+@router.post("/webhooks", status_code=201)
+def add_webhook(db: DbDep, user: OrganizerDep, body: WebhookIn):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        endpoint = notifications.add_webhook(
+            db, membership.festival_id, body.url, body.events
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": endpoint.id}
+
+
+@router.delete("/webhooks/{endpoint_id}")
+def delete_webhook(db: DbDep, user: OrganizerDep, endpoint_id: int):
+    membership = _membership(db, user)
+    _require_owner(membership)
+    try:
+        notifications.delete_webhook(db, endpoint_id, membership.festival_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@router.get("/ad.svg")
+def ad_creator(
+    db: DbDep,
+    user: OrganizerDep,
+    headline: str = "Submissions open",
+    subline: str = "",
+    cta: str = "Submit now",
+    bg: str = "amber",
+    fmt: str = "square",
+):
+    """Ad creator: social graphics in the festival's Reelfit branding."""
+    membership = _membership(db, user)
+    festival = festivals.get_festival(db, membership.festival_id)
+    svg = certificates.render_ad_svg(
+        festival.name, headline, subline=subline, cta=cta,
+        background=bg, fmt="square" if fmt == "square" else "wide",
+    )
+    return Response(content=svg, media_type="image/svg+xml")
 
 
 @router.get("/codes")
@@ -844,6 +1145,14 @@ def update_status(db: DbDep, user: OrganizerDep, submission_id: int, body: Statu
     if body.status in SELECTED_STATUSES:
         certificates.issue_certificate(db, sub.id)
     db.commit()
+    notifications.fire_event(
+        db, membership.festival_id, "submission.status_changed",
+        {
+            "tracking_number": sub.tracking_number,
+            "film_title": film.title,
+            "status": body.status.value,
+        },
+    )
     return {"ok": True}
 
 

@@ -14,6 +14,7 @@ import Credits from "./pages/Credits.jsx";
 import ReviewNew from "./pages/ReviewNew.jsx";
 import FestivalDashboard from "./pages/FestivalDashboard.jsx";
 import FestivalSubmissionDetail from "./pages/FestivalSubmissionDetail.jsx";
+import Help from "./pages/Help.jsx";
 
 function Protected({ kind, children }) {
   const { user, loading } = useAuth();
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/help" element={<Help />} />
         <Route path="/festivals" element={<Festivals />} />
         <Route path="/festivals/:slug" element={<FestivalDetail />} />
         <Route path="/dashboard" element={<Protected kind="filmmaker"><Dashboard /></Protected>} />

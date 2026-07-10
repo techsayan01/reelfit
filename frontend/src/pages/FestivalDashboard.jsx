@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, money } from "../api.js";
+import {
+  AdCreatorCard,
+  LaurelCard,
+  MarketingCard,
+  ReportsCard,
+  TransactionsCard,
+  WebhooksCard,
+} from "./FestivalTools.jsx";
 import { useAuth } from "../AuthContext.jsx";
 import CalibrationTag from "../components/CalibrationTag.jsx";
 
@@ -1039,9 +1047,37 @@ export default function FestivalDashboard() {
         <div>
           <SubmissionsManager data={data} onStatusChange={updateStatus} />
           <InsightsCard />
+          {can_edit_profile && (
+            <>
+              <MarketingCard />
+              <TransactionsCard />
+              <ReportsCard onError={setError} />
+            </>
+          )}
 
           <div className="card">
             <h2>Filmmaker reviews</h2>
+            {can_edit_profile && (
+              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 400 }}>
+                <input
+                  type="checkbox"
+                  checked={festival.reviews_public ?? true}
+                  onChange={async (e) => {
+                    try {
+                      await api("/api/festival/profile", {
+                        method: "PATCH",
+                        body: { reviews_public: e.target.checked },
+                      });
+                      load();
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                  style={{ width: "auto", minHeight: "auto" }}
+                />
+                Show reviews publicly on your listing page
+              </label>
+            )}
             {reviews.length === 0 && <p className="muted">No reviews yet.</p>}
             <div className="list-divided">
               {reviews.map((r) => (
@@ -1083,6 +1119,9 @@ export default function FestivalDashboard() {
               <MessagesCard onError={setError} />
               <DiscountsCard onError={setError} />
               <WaiverPeriodCard festival={festival} onSaved={load} onError={setError} />
+              <WebhooksCard onError={setError} />
+              <AdCreatorCard />
+              <LaurelCard festival={festival} />
             </>
           )}
           <div className="card">

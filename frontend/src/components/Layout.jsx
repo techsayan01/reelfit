@@ -34,6 +34,7 @@ export default function Layout({ children }) {
           </button>
           <nav className={`site-nav ${open ? "open" : ""}`} aria-label="Main">
             <Link to="/festivals" onClick={close}>Festivals</Link>
+            <Link to="/help" onClick={close}>Help</Link>
             {user && user.kind === "filmmaker" && (
               <>
                 <Link to="/dashboard" onClick={close}>My films</Link>

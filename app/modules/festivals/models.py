@@ -58,6 +58,8 @@ class Festival(Base):
     # How many days after the final deadline deadline-waiver codes still work
     # (0 = no late entries).
     deadline_waiver_days: Mapped[int] = mapped_column(Integer, default=0)
+    # Whether filmmaker reviews show on the public listing page.
+    reviews_public: Mapped[bool] = mapped_column(Boolean, default=True)
     # Non-public listings are visible only to their own staff — useful while
     # a festival sets up its profile before launch.
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -157,6 +159,18 @@ class FlagDef(Base):
     name: Mapped[str] = mapped_column(String(60))
     color: Mapped[str] = mapped_column(String(20), default="#C0392B")  # hex
     position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TrackingVisit(Base):
+    """A public festival-page view with its traffic source — feeds the
+    conversion analytics that incumbents don't offer (BRD §5.1.5 ★)."""
+
+    __tablename__ = "tracking_visits"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    festival_id: Mapped[int] = mapped_column(ForeignKey("festivals.id"), index=True)
+    ref: Mapped[str] = mapped_column(String(60), default="direct")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class HistoricalSelection(Base):

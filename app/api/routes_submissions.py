@@ -24,6 +24,7 @@ class SubmissionIn(BaseModel):
     discount_code: str = ""
     cover_letter: str = ""
     answers: dict[int, str] = {}
+    source: str = "direct"
 
 
 def own_submission(db, user, submission_id: int):
@@ -143,9 +144,18 @@ def create_submission(db: DbDep, user: FilmmakerDep, body: SubmissionIn):
             discount_code=body.discount_code,
             cover_letter=body.cover_letter,
             answers=body.answers,
+            source=body.source,
         )
     except SubmissionError as exc:
         raise HTTPException(400, str(exc))
+    notifications.fire_event(
+        db, body.festival_id, "submission.received",
+        {
+            "tracking_number": sub.tracking_number,
+            "film_title": film.title,
+            "category_id": body.category_id,
+        },
+    )
     return {"submission": {"id": sub.id, "fee_paid_cents": sub.fee_paid_cents}}
 
 

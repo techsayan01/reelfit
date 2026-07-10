@@ -40,6 +40,7 @@ def create_submission(
     discount_code: str = "",
     cover_letter: str = "",
     answers: dict[int, str] | None = None,
+    source: str = "direct",
 ) -> Submission:
     festival = festivals.get_festival(db, festival_id)
     if festival is None:
@@ -131,6 +132,7 @@ def create_submission(
         discount_code=applied_code,
         tracking_number=festivals.assign_tracking_number(db, festival_id),
         cover_letter=cover_letter.strip(),
+        source="".join(c for c in source.strip().lower() if c.isalnum() or c in "-_")[:60] or "direct",
     )
     db.add(submission)
     db.flush()

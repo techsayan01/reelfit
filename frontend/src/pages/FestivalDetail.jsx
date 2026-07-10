@@ -26,7 +26,13 @@ export default function FestivalDetail() {
   const [tab, setTab] = useState("about");
 
   useEffect(() => {
-    api(`/api/festivals/${slug}`).then(setData).catch((e) => setError(e.message));
+    // Marketing attribution: remember ?ref= so a later submission is
+    // credited to the channel that brought this visitor.
+    const ref = new URLSearchParams(window.location.search).get("ref") || "";
+    if (ref) sessionStorage.setItem("reelfit_ref", ref);
+    api(`/api/festivals/${slug}?ref=${encodeURIComponent(ref)}`)
+      .then(setData)
+      .catch((e) => setError(e.message));
   }, [slug]);
 
   if (error) return <p className="form-error">{error}</p>;

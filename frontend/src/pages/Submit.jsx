@@ -54,6 +54,7 @@ export default function Submit() {
           discount_code: form.get("discount_code") || "",
           cover_letter: form.get("cover_letter") || "",
           answers,
+          source: sessionStorage.getItem("reelfit_ref") || "direct",
         },
       });
       navigate("/dashboard");

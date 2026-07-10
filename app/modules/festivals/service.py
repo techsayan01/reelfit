@@ -15,6 +15,7 @@ from app.modules.festivals.models import (
     FlagDef,
     HistoricalSelection,
     QuestionType,
+    TrackingVisit,
 )
 
 # Festival profile fields organizers may edit through update_profile.
@@ -22,7 +23,7 @@ PROFILE_FIELDS = (
     "description", "country", "region", "logo_url", "cover_url", "rules",
     "awards_and_prizes", "contact_email", "phone", "website", "twitter",
     "instagram", "venue_name", "venue_address", "founded_year", "is_public",
-    "tracking_prefix", "deadline_waiver_days",
+    "tracking_prefix", "deadline_waiver_days", "reviews_public",
 )
 
 
@@ -240,6 +241,22 @@ def delete_flag(db: Session, flag_id: int, festival_id: int) -> None:
         raise ValueError("Flag not found.")
     db.delete(flag)
     db.commit()
+
+
+def record_visit(db: Session, festival_id: int, ref: str) -> None:
+    """Log a public listing view with its traffic source."""
+    ref = "".join(c for c in ref.strip().lower() if c.isalnum() or c in "-_")[:60] or "direct"
+    db.add(TrackingVisit(festival_id=festival_id, ref=ref))
+    db.commit()
+
+
+def visits_by_ref(db: Session, festival_id: int) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for v in db.scalars(
+        select(TrackingVisit).where(TrackingVisit.festival_id == festival_id)
+    ):
+        counts[v.ref] = counts.get(v.ref, 0) + 1
+    return counts
 
 
 def ingest_historical_selection(

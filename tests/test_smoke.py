@@ -627,6 +627,82 @@ def test_custom_form_flags_messages_insights(client):
     assert any("Screening date announced" in n["subject"] for n in notes)
 
 
+def test_marketing_reports_exports_webhooks(client):
+    _seed_festival()
+    _make_owner(client, email="owner7@example.com")
+
+    # Public page views with attribution
+    client.post("/api/auth/logout")
+    client.get("/api/festivals/test-fest?ref=instagram")
+    client.get("/api/festivals/test-fest?ref=instagram")
+    client.get("/api/festivals/test-fest")
+
+    # A submission attributed to instagram
+    _register_filmmaker(client, email="m@example.com")
+    film_id = client.post("/api/films", json={
+        "title": "Tracked Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    }).json()["film"]["id"]
+    client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": 1, "category_id": 1,
+        "source": "instagram",
+    })
+
+    client.post("/api/auth/login", json={
+        "email": "owner7@example.com", "password": "password123",
+    })
+    # Marketing summary: views → submissions → conversion by source
+    marketing = client.get("/api/festival/marketing").json()
+    insta = next(r for r in marketing["rows"] if r["source"] == "instagram")
+    assert insta["views"] == 2 and insta["submissions"] == 1
+    assert insta["conversion_pct"] == 50.0
+    assert marketing["totals"]["views"] == 3
+    assert marketing["totals"]["revenue_cents"] == 3000
+
+    # Transactions ledger
+    months = client.get("/api/festival/transactions").json()["months"]
+    assert months[0]["total_cents"] == 3000
+    assert months[0]["items"][0]["film_title"] == "Tracked Film"
+
+    # Aggregate report CSV
+    resp = client.get("/api/festival/reports?report=sales_by_category")
+    assert resp.status_code == 200
+    assert "Short Film,1,30.00" in resp.text
+
+    # Export configuration + CSV export
+    config_id = client.post("/api/festival/export-configs", json={
+        "name": "Website results", "columns": ["tracking_number", "film_title", "status"],
+    }).json()["id"]
+    resp = client.get(f"/api/festival/export?config_id={config_id}")
+    assert resp.text.splitlines()[0] == "tracking_number,film_title,status"
+    assert "Tracked Film" in resp.text
+    # PII check: default export uses relay contact, never an email
+    resp = client.get("/api/festival/export")
+    assert "@" not in resp.text.replace("@example.com", "")  # no raw emails
+
+    # Webhooks CRUD + validation
+    assert client.post("/api/festival/webhooks", json={
+        "url": "ftp://bad", "events": ["submission.received"],
+    }).status_code == 400
+    hook_id = client.post("/api/festival/webhooks", json={
+        "url": "https://example.com/hook", "events": ["submission.received"],
+    }).json()["id"]
+    hooks = client.get("/api/festival/webhooks").json()["webhooks"]
+    assert hooks[0]["events"] == ["submission.received"]
+    assert client.delete(f"/api/festival/webhooks/{hook_id}").status_code == 200
+
+    # Ad creator + public laurel render
+    resp = client.get("/api/festival/ad.svg?headline=July%20Deadline&bg=ink&fmt=wide")
+    assert resp.status_code == 200 and "July Deadline" in resp.text
+    resp = client.get("/api/festivals/test-fest/laurel.svg?text=Award%20Winner&variant=white")
+    assert resp.status_code == 200 and "AWARD WINNER" in resp.text
+
+    # Review visibility toggle hides public reviews
+    client.patch("/api/festival/profile", json={"reviews_public": False})
+    detail = client.get("/api/festivals/test-fest").json()
+    assert detail["reviews_public"] is False and detail["reviews"] == []
+
+
 def test_festival_dashboard_requires_organizer(client):
     _register_filmmaker(client)
     resp = client.get("/api/festival/dashboard")
