@@ -11,6 +11,13 @@ For setup and quick start, see [../README.md](../README.md). For a running
 list of what's intentionally out of scope for Phase 1, see
 [Deferred & rejected](#deferred--rejected-items).
 
+> **In progress — visual redesign.** A “cinematic dark studio” restyle
+> (dark palette, left-sidebar app shell, poster-forward layout) is approved
+> and planned but not yet built. Pick it up from **[REDESIGN.md](REDESIGN.md)**;
+> the before/after mockup and palette live at
+> [redesign/dark-studio-mockup.html](redesign/dark-studio-mockup.html)
+> (open in a browser).
+
 ## Contents
 
 - [Filmmaker features](#filmmaker-features)
