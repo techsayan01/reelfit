@@ -54,6 +54,15 @@ list of what's intentionally out of scope for Phase 1, see
   score is ever presented as more certain than the data supports (BRD
   §7.5).
 - Screenplays score with the runtime component held neutral.
+- **Festival ranking** (BRD §7.4): the "Where your film fits" view ranks
+  every scored festival by fit *and* by whether you can actually act on it
+  now — festivals you can't submit to (closed, or no matching category)
+  drop below every submittable one regardless of score. Each row carries a
+  plain-language reason (strong / solid / stretch / long shot), the cheapest
+  eligible fee, the active deadline, and a **Closing soon** flag inside 14
+  days. Computed on demand from stored fit scores
+  ([app/modules/recommendations/service.py](../app/modules/recommendations/service.py));
+  becomes a persisted snapshot table only if frozen history is needed.
 
 ### Submission workflow (BRD §5.2.2–5.2.3)
 - Multi-step submit flow: category (auto-filtered to eligible categories
@@ -93,6 +102,38 @@ list of what's intentionally out of scope for Phase 1, see
   runtime, and festival-selection count. Reelfit never takes rights,
   never acts as a sales agent — this module only recommends (BRD §3.2,
   §9).
+
+### Project page media (BRD §5.2.1)
+- Each film has a full project page filmmakers build from **`/films/:id/edit`**:
+  **still photos** (gallery), **project links** (website / Instagram / Bluesky),
+  **News & Reviews** (press links), and **Screenings & Awards**.
+- The **Screenings & Awards** run is split honestly: Reelfit-**verified**
+  selections are computed from real submission outcomes and can't be edited;
+  screenings and awards from *outside* Reelfit are entered separately and
+  clearly labelled as filmmaker-reported. The two never blur together.
+- The media belongs to the filmmaker and their projects: stills and press
+  aggregate onto the public profile (`/f/:handle`), and each project's links
+  ride along in the filmography.
+- Festivals are **read-only viewers** — the same media renders on the
+  submission page (Still Photos with a **Download images** action, Project
+  Links, News & Reviews, and a Screenings & Awards tab) so programmers judge
+  with full context, while contact stays behind the masked relay.
+
+### Public filmmaker profile (BRD §5.2.1)
+- A shareable public page at **`/f/:handle`** — cover image, headshot,
+  name, role/title, tagline, bio, contact & social links (website,
+  Instagram, Facebook, X, LinkedIn, IMDb, optional public email), and
+  personal details (based in, hometown, education).
+- **Filmography** built from the filmmaker's project library, newest first,
+  each with its project links.
+- **Stills** and **News & Reviews** aggregated across all their projects.
+- **Awards & Selections drawn from real submission outcomes** — official
+  selections, awards and honorable mentions are pulled from actual Reelfit
+  submission records, never self-reported free text. This is the honest-by-
+  default counterpart to incumbents' unverifiable award lists (BRD §5.3, §9).
+- Private by default: the filmmaker claims a unique handle and explicitly
+  publishes; contact email stays masked unless opted in. Edited from
+  **`/profile`**.
 
 ### Payments (BRD §5.2.5)
 - Scoring credit packs (single / 3-pack / 5-pack) purchased through a
@@ -285,6 +326,15 @@ at `/internal/docs` when the server is running.
 | GET | `/{slug}` | Festival detail: profile, categories, timeline, stats, reviews. Logs a tracking visit via `?ref=` |
 | GET | `/{slug}/laurel.svg` | Public laurel graphic, no auth |
 
+### Filmmaker profiles
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/filmmakers/{handle}` | Public profile: bio, filmography, verified selections, links (no auth; 404 unless published) |
+| GET | `/api/me/profile` | My editable profile (filmmaker) |
+| PATCH | `/api/me/profile` | Update profile details, bio, name, links |
+| PUT | `/api/me/profile/handle` | Claim/change public handle (unique) |
+| PUT | `/api/me/profile/publish` | Publish / unpublish the profile |
+
 ### Films — `/api/films` (filmmaker)
 | Method | Path | Purpose |
 |---|---|---|
@@ -292,6 +342,8 @@ at `/internal/docs` when the server is running.
 | POST | `` | Add a film or screenplay |
 | POST | `/{id}/score` | Score against every listed festival (spends 1 credit) |
 | GET | `/{id}/scores` | Latest scores + distribution guidance |
+| GET | `/{id}` | One film + project-page media (photos, links, screenings, press) |
+| POST/DELETE | `/{id}/photos`, `/{id}/links`, `/{id}/screenings`, `/{id}/press` | Manage project-page media |
 
 ### Submissions — `/api/submissions` (filmmaker)
 | Method | Path | Purpose |
@@ -359,8 +411,11 @@ at `/internal/docs` when the server is running.
 | `/help` | Help Center | Everyone |
 | `/login`, `/register` | Auth | Everyone |
 | `/festivals`, `/festivals/:slug` | Festival directory & public profile | Everyone |
+| `/f/:handle` | Public filmmaker profile (bio, filmography, verified selections) | Everyone |
 | `/dashboard` | Film library, submissions, credits, notifications | Filmmaker |
+| `/profile` | Edit & publish public filmmaker profile | Filmmaker |
 | `/films/new`, `/films/:id/scores` | Add a project, view scores + guidance | Filmmaker |
+| `/films/:id/edit` | Build the project page (photos, links, screenings, press) | Filmmaker |
 | `/submit` | Submit form (categories, codes, custom questions, cover letter) | Filmmaker |
 | `/credits` | Buy scoring credits | Filmmaker |
 | `/reviews/new` | Leave a festival review | Filmmaker |

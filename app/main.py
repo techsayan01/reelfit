@@ -13,6 +13,7 @@ from app.api import (
     routes_festival_admin,
     routes_festivals,
     routes_films,
+    routes_profiles,
     routes_reviews,
     routes_submissions,
 )
@@ -49,7 +50,7 @@ def create_app() -> FastAPI:
 
     for module in (
         routes_auth, routes_festivals, routes_films, routes_submissions,
-        routes_reviews, routes_credits, routes_festival_admin,
+        routes_reviews, routes_credits, routes_festival_admin, routes_profiles,
     ):
         app.include_router(module.router)
 

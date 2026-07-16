@@ -17,6 +17,83 @@ class DistributionSuggestion:
     rationale: str
 
 
+@dataclass(frozen=True)
+class FestivalMatch:
+    festival_id: int
+    score: int
+    reason: str
+    tier: str  # "strong" | "solid" | "stretch" | "longshot" | "unavailable"
+    closing_soon: bool
+    submittable: bool
+
+
+# Deadline within this many days is flagged "closing soon" on a recommendation.
+CLOSING_SOON_DAYS = 14
+
+
+def rank_festivals(candidates: list[dict]) -> list[FestivalMatch]:
+    """Turn a film's raw per-festival fit scores into a ranked, plain-language
+    recommendation list — the "where should I spend my submission fee" view
+    (BRD §7.4 festival ranking).
+
+    Each candidate dict describes one scored festival:
+        festival_id:   int
+        score:         int   (0-100 fit score)
+        open:          bool  (currently accepting submissions)
+        eligible:      bool  (has a category this film can enter)
+        days_to_deadline: int | None
+
+    Fit score is the primary signal, but a festival you can't actually submit
+    to right now is demoted below every submittable one, no matter how strong
+    the match — a great score you can't act on isn't a useful recommendation.
+    """
+    matches: list[FestivalMatch] = []
+    for c in candidates:
+        submittable = bool(c["open"]) and bool(c["eligible"])
+        days = c.get("days_to_deadline")
+        closing_soon = (
+            submittable and days is not None and 0 <= days <= CLOSING_SOON_DAYS
+        )
+        score = c["score"]
+
+        if not submittable:
+            if not c["open"]:
+                reason = "Not open for submissions right now — check back for the next edition."
+            else:
+                reason = "No category matches this film at the moment."
+            tier = "unavailable"
+        elif score >= 75:
+            reason = "Strong match — your film looks a lot like what they select."
+            tier = "strong"
+        elif score >= 55:
+            reason = "Solid match — a fee here looks well spent."
+            tier = "solid"
+        elif score >= 40:
+            reason = "A stretch, but within range — worth it if the festival matters to you."
+            tier = "stretch"
+        else:
+            reason = "Long shot — your fee is likely better spent elsewhere."
+            tier = "longshot"
+
+        if closing_soon:
+            reason += (
+                " Deadline is today." if days == 0
+                else f" Deadline in {days} day{'s' if days != 1 else ''}."
+            )
+
+        matches.append(FestivalMatch(
+            festival_id=c["festival_id"], score=score, reason=reason,
+            tier=tier, closing_soon=closing_soon, submittable=submittable,
+        ))
+
+    # Submittable first; then by fit score; then soonest-closing as a nudge.
+    matches.sort(
+        key=lambda m: (m.submittable, m.score, m.closing_soon),
+        reverse=True,
+    )
+    return matches
+
+
 def distribution_guidance(genre: str, runtime_minutes: int, festival_selections: int) -> list[DistributionSuggestion]:
     """Realistic next-step suggestions based on the film's profile.
 

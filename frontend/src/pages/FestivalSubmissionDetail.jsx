@@ -13,6 +13,10 @@ const RECOMMENDATIONS = [
 const recLabel = (value) =>
   RECOMMENDATIONS.find(([v]) => v === value)?.[1] ?? value;
 
+const LINK_KIND_LABEL = {
+  website: "Website", instagram: "Instagram", bluesky: "Bluesky", other: "Link",
+};
+
 /** Convert a YouTube/Vimeo watch URL into an embeddable player URL. */
 function embedUrl(url) {
   if (!url) return null;
@@ -265,8 +269,12 @@ export default function FestivalSubmissionDetail() {
   const {
     submission, film, filmmaker, status_log, notes, statuses,
     can_update, prev_id, next_id, custom_answers = [], flags = [],
+    photos = [], links = [], press = [], screenings_run = { verified: [], external: [] },
   } = data;
-  const tabs = ["overview", "credits", "specifications", "cover letter"];
+  const hasRun = screenings_run.verified.length > 0 || screenings_run.external.length > 0;
+  const tabs = ["overview", "credits", "specifications"];
+  if (hasRun) tabs.push("screenings & awards");
+  tabs.push("cover letter");
   if (custom_answers.length > 0) tabs.push("custom form");
 
   const setFlag = async (flag_id) => {
@@ -352,8 +360,22 @@ export default function FestivalSubmissionDetail() {
             <div className="card">
               {film.logline && <p><em>{film.logline}</em></p>}
               <p>{film.synopsis || "No synopsis provided."}</p>
-              <h3>About the filmmaker — {filmmaker.display_name}</h3>
+              <h3 style={{ marginBottom: 2 }}>
+                About the filmmaker — {filmmaker.display_name}
+              </h3>
+              {(filmmaker.title || filmmaker.location) && (
+                <p className="muted" style={{ margin: "0 0 8px" }}>
+                  {[filmmaker.title, filmmaker.location].filter(Boolean).join(" · ")}
+                </p>
+              )}
               <p>{filmmaker.bio || "No bio provided."}</p>
+              {filmmaker.profile_handle && (
+                <p>
+                  <Link className="btn btn-secondary" to={`/f/${filmmaker.profile_handle}`}>
+                    View public profile ↗
+                  </Link>
+                </p>
+              )}
               {trailer && (
                 <div className="screener-frame">
                   <iframe src={trailer} title="Trailer" allow="fullscreen" allowFullScreen />
@@ -406,6 +428,46 @@ export default function FestivalSubmissionDetail() {
                   />
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {tab === "screenings & awards" && (
+            <div className="card">
+              {screenings_run.verified.length > 0 && (
+                <>
+                  <p className="muted">
+                    Verified on Reelfit — drawn from real selection records.
+                  </p>
+                  <div className="list-divided">
+                    {screenings_run.verified.map((s, i) => (
+                      <div key={`v${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <strong>{s.festival_name}{s.edition_label && <span className="muted"> · {s.edition_label}</span>}</strong>
+                        <span className="selection-badge badge-selected">{s.achievement}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {screenings_run.external.length > 0 && (
+                <>
+                  <p className="muted" style={{ marginTop: 16 }}>
+                    Also reported by the filmmaker (outside Reelfit):
+                  </p>
+                  <div className="list-divided">
+                    {screenings_run.external.map((s, i) => (
+                      <div key={`e${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <span>
+                          <strong>{s.festival_name}</strong>
+                          {(s.location || s.happened_on) && (
+                            <span className="muted"> · {[s.location, s.happened_on].filter(Boolean).join(" · ")}</span>
+                          )}
+                        </span>
+                        {s.award && <span className="selection-badge badge-award">{s.award}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -492,6 +554,56 @@ export default function FestivalSubmissionDetail() {
 
           <RatingCard data={data} submissionId={id} onChanged={load} onError={setError} />
           <JudgesCard data={data} submissionId={id} onChanged={load} onError={setError} />
+
+          {photos.length > 0 && (
+            <div className="card">
+              <h2>Still photos</h2>
+              <div className="photo-grid">
+                {photos.map((p) => (
+                  <a key={p.id} href={p.url} target="_blank" rel="noreferrer"
+                     download title={p.caption || "Open / download"}>
+                    <img src={p.url} alt={p.caption || film.title} loading="lazy" />
+                  </a>
+                ))}
+              </div>
+              <p className="btn-row" style={{ marginTop: 12 }}>
+                <button className="btn btn-secondary" onClick={() => photos.forEach((p) => window.open(p.url, "_blank", "noopener"))}>
+                  Download images
+                </button>
+              </p>
+            </div>
+          )}
+
+          {links.length > 0 && (
+            <div className="card">
+              <h2>Project links</h2>
+              <ul className="contact-list">
+                {links.map((l) => (
+                  <li key={l.id}>
+                    <a href={l.url} target="_blank" rel="noreferrer">
+                      {LINK_KIND_LABEL[l.kind] || "Link"}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {press.length > 0 && (
+            <div className="card">
+              <h2>News &amp; Reviews</h2>
+              <div className="list-divided">
+                {press.map((pr) => (
+                  <p key={pr.id} style={{ margin: 0 }}>
+                    {pr.url
+                      ? <a href={pr.url} target="_blank" rel="noreferrer"><strong>{pr.title}</strong></a>
+                      : <strong>{pr.title}</strong>}
+                    {pr.outlet && <><br /><span className="muted">{pr.outlet}</span></>}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="card">
             <h2>Submission</h2>

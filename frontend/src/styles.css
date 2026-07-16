@@ -60,6 +60,9 @@ select:focus-visible, textarea:focus-visible {
 @media (min-width: 700px) { .page { padding: 28px 24px 96px; } }
 
 .two-col { display: grid; grid-template-columns: 1fr; gap: 20px; }
+/* Let columns shrink below their content's intrinsic width so children like the
+   horizontally-scrolling tab row scroll instead of widening the page. */
+.two-col > * { min-width: 0; }
 @media (min-width: 820px) {
   .two-col { grid-template-columns: 3fr 2fr; gap: 32px; }
 }
@@ -173,8 +176,12 @@ select:focus-visible, textarea:focus-visible {
 }
 @media (min-width: 700px) { .card { padding: 24px; } }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
+/* Cards are query containers so their tables can stack based on the card's own
+   width, not just the viewport — a wide viewport can still hold a narrow card
+   (e.g. the submissions table in the dashboard's 3fr column). */
+.card { container-type: inline-size; }
 
-/* ---------- Responsive tables: stack into cards on small screens ---------- */
+/* ---------- Responsive tables: stack into cards when space is tight ------- */
 table.stack { width: 100%; border-collapse: collapse; }
 table.stack th, table.stack td {
   text-align: left;
@@ -184,6 +191,27 @@ table.stack th, table.stack td {
 }
 table.stack th { color: var(--soft-charcoal); font-weight: 600; font-size: 0.9rem; }
 
+/* Stack when the containing card is narrow (primary), with a viewport fallback
+   for any .stack table that isn't inside a card. */
+@container (max-width: 640px) {
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    padding: 6px 12px;
+    background: #fff;
+  }
+  table.stack td { border: none; padding: 8px 0; }
+  table.stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.82rem;
+    color: var(--soft-charcoal);
+    font-weight: 600;
+  }
+}
 @media (max-width: 699px) {
   table.stack thead { display: none; }
   table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
@@ -225,6 +253,13 @@ textarea { min-height: 100px; }
   padding: 12px 16px;
   background: #fdf3f1;
 }
+.form-success {
+  color: var(--darkroom-teal);
+  border: 1px solid var(--darkroom-teal);
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #eef3f1;
+}
 .form-narrow { max-width: 540px; }
 
 /* ---------- Tags ---------- */
@@ -241,6 +276,14 @@ textarea { min-height: 100px; }
 .tag-calibrating { background: #f6ecdc; color: #8a5c12; }
 .tag-status { background: #f1eee9; color: var(--soft-charcoal); }
 .tag-selected { background: #f6ecdc; color: #8a5c12; font-weight: 600; }
+.tag-closing { background: #fbe4e0; color: #9a3412; font-weight: 600; }
+
+/* Plain-language "why this festival" line under each ranked score. */
+.rec-reason { margin: 2px 0 8px; }
+.rec-reason.rec-strong { color: var(--darkroom-teal); font-weight: 600; }
+.rec-reason.rec-unavailable { color: var(--soft-charcoal); }
+.rec-facts { margin: 0 0 10px; font-size: 0.9rem; }
+.rec-facts .sep { opacity: 0.5; margin: 0 6px; }
 
 /* ---------- Fit Score dial — the signature element (BRD §6.4) ---------- */
 .score-dial .ring-bg { stroke: var(--reel-ink); opacity: 0.12; }
@@ -310,6 +353,73 @@ textarea { min-height: 100px; }
   background: #fff;
   object-fit: cover;
 }
+
+/* ---------- Filmmaker public profile ---------- */
+.profile-header { position: relative; margin-bottom: 56px; }
+.profile-headshot {
+  position: absolute;
+  left: 20px;
+  bottom: -44px;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 3px solid var(--paper-white);
+  background: var(--marquee-amber);
+  color: #fff;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif, Georgia, serif);
+  font-size: 2.2rem;
+}
+.profile-title { color: var(--soft-charcoal); margin: 2px 0 0; }
+.profile-tagline { font-style: italic; margin: 10px 0 0; }
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.photo-grid img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+.contact-list { list-style: none; margin: 0; padding: 0; }
+.contact-list li { padding: 6px 0; }
+.contact-list a { word-break: break-all; }
+
+.credit-row { display: flex; gap: 14px; align-items: baseline; padding: 12px 0; }
+.credit-row .credit-year { color: var(--soft-charcoal); font-variant-numeric: tabular-nums; min-width: 44px; }
+.credit-row .credit-body { flex: 1; }
+.credit-row h3 { margin: 0 0 2px; }
+.credit-kind {
+  display: inline-block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--soft-charcoal);
+}
+
+.selection-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: #f1eee9;
+  color: var(--soft-charcoal);
+}
+.selection-badge.badge-award { background: #f6ecdc; color: #8a5c12; }
+.selection-badge.badge-selected { background: #e9f0ee; color: var(--darkroom-teal); }
+
+.detail-grid { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 4px 0; }
+.detail-grid dt { color: var(--soft-charcoal); }
+.detail-grid dd { margin: 0; }
 
 .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin: 16px 0 4px; }
 .stat-block .stat-value { font-size: 1.6rem; color: var(--reel-ink); }

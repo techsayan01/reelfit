@@ -77,6 +77,10 @@ def get_festival_by_slug(db: Session, slug: str) -> Festival | None:
     return db.scalar(select(Festival).where(Festival.slug == slug))
 
 
+def get_edition(db: Session, edition_id: int) -> FestivalEdition | None:
+    return db.get(FestivalEdition, edition_id)
+
+
 def current_edition(db: Session, festival_id: int) -> FestivalEdition | None:
     """The edition currently open for submissions, or the next upcoming one."""
     today = date.today()

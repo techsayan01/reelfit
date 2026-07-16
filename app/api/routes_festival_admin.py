@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.api.deps import DbDep, OrganizerDep
 from app.api.routes_festivals import festival_payload
+from app.api.routes_films import film_media_payload
 from app.modules.accounts import service as accounts
 from app.modules.accounts.models import FestivalMembership, OrgRole
 from datetime import date, timedelta
@@ -900,6 +901,39 @@ def _own_submission(db, membership, submission_id: int):
     return sub
 
 
+# Submission statuses shown on the "Screenings & Awards" tab as a verified run.
+_VERIFIED_ACHIEVEMENTS = {
+    SubmissionStatus.AWARD_WINNER: "Award Winner",
+    SubmissionStatus.HONORABLE_MENTION: "Honorable Mention",
+    SubmissionStatus.SELECTED: "Official Selection",
+}
+
+
+def _film_screenings(db, film) -> dict:
+    """The film's festival run for the Screenings & Awards tab: Reelfit-verified
+    selections (from real submission outcomes) plus filmmaker-entered external
+    screenings, kept clearly separate so verified never blurs with self-reported."""
+    verified = []
+    for sub in submissions.submissions_for_films(db, [film.id]):
+        if sub.status not in _VERIFIED_ACHIEVEMENTS:
+            continue
+        fest = festivals.get_festival(db, sub.festival_id)
+        edition = festivals.get_edition(db, sub.edition_id)
+        verified.append({
+            "festival_name": fest.name if fest else "A festival",
+            "edition_label": edition.label if edition else "",
+            "achievement": _VERIFIED_ACHIEVEMENTS[sub.status],
+        })
+    external = [
+        {
+            "festival_name": s.festival_name, "location": s.location,
+            "happened_on": s.happened_on, "award": s.award,
+        }
+        for s in film.screenings
+    ]
+    return {"verified": verified, "external": external}
+
+
 @router.get("/submissions/{submission_id}")
 def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
     """Everything a programmer needs to judge one entry. The filmmaker's
@@ -908,6 +942,7 @@ def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
     sub = _own_submission(db, membership, submission_id)
     film = accounts.get_film(db, sub.film_id)
     filmmaker = accounts.get_user(db, film.filmmaker_id)
+    profile = accounts.get_or_create_profile(db, filmmaker.id)
     festival = festivals.get_festival(db, membership.festival_id)
     categories = {
         c.id: c.name
@@ -963,9 +998,17 @@ def submission_detail(db: DbDep, user: OrganizerDep, submission_id: int):
             "first_time_filmmaker": film.first_time_filmmaker,
             "student_project": film.student_project,
         },
+        **film_media_payload(film),
+        "screenings_run": _film_screenings(db, film),
         "filmmaker": {
             "display_name": filmmaker.display_name,
             "bio": filmmaker.bio,
+            # A link to the filmmaker's public profile, only when they've
+            # published one — programmers can see their full body of work and
+            # verified festival history without breaking the masked-contact rule.
+            "profile_handle": profile.handle if profile.is_public else None,
+            "title": profile.title if profile.is_public else "",
+            "location": profile.location if profile.is_public else "",
         },
         "status_log": [
             {

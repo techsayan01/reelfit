@@ -69,6 +69,9 @@ export default function Dashboard() {
                     <Link className="btn btn-secondary" to={`/films/${film.id}/scores`}>
                       See where it fits
                     </Link>
+                    <Link className="btn btn-quiet" to={`/films/${film.id}/edit`}>
+                      Edit project page
+                    </Link>
                     <button className="btn btn-quiet" onClick={() => scoreFilm(film)}>
                       Re-score (1 credit)
                     </button>

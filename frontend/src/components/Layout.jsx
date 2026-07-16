@@ -38,6 +38,7 @@ export default function Layout({ children }) {
             {user && user.kind === "filmmaker" && (
               <>
                 <Link to="/dashboard" onClick={close}>My films</Link>
+                <Link to="/profile" onClick={close}>My profile</Link>
                 <span className="nav-item muted">
                   {user.credit_balance} credit{user.credit_balance !== 1 ? "s" : ""}
                 </span>

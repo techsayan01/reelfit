@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api } from "../api.js";
+import { api, money } from "../api.js";
 import { useAuth } from "../AuthContext.jsx";
 import CalibrationTag from "../components/CalibrationTag.jsx";
 import ScoreDial from "../components/ScoreDial.jsx";
@@ -50,30 +50,50 @@ export default function FilmScores() {
       {scores.length > 0 ? (
         <div className="card">
           <p className="muted">
+            Ranked by fit and by whether you can actually submit right now.
             Scores estimate how closely your film matches what each festival has
-            actually selected before. A lower number isn't a failure — it's
+            actually selected before — a lower number isn't a failure, it's
             information that saves you a fee.
           </p>
-          {scores.map((row) => (
+          {scores.map((row) => {
+            const rec = row.recommendation || {};
+            return (
             <div className="dial-row" key={row.festival.id}>
               <ScoreDial score={row.score} calibration={row.calibration_status} />
               <div className="dial-info">
                 <h3 style={{ margin: 0 }}>
                   <Link to={`/festivals/${row.festival.slug}`}>{row.festival.name}</Link>{" "}
                   <CalibrationTag status={row.calibration_status} />
+                  {rec.closing_soon && <span className="tag tag-closing">Closing soon</span>}
                 </h3>
-                <p className="muted" style={{ margin: "4px 0 10px" }}>
-                  Confidence: {Math.round(row.confidence * 100)}%
+                <p className={`rec-reason ${rec.tier === "strong" ? "rec-strong" : ""} ${rec.submittable ? "" : "rec-unavailable"}`}>
+                  {rec.reason}
                 </p>
-                <Link
-                  className="btn btn-primary"
-                  to={`/submit?film=${film.id}&festival=${row.festival.id}`}
-                >
-                  Send your film
-                </Link>
+                <p className="rec-facts muted">
+                  Confidence {Math.round(row.confidence * 100)}%
+                  {row.open && row.fee_cents != null && (
+                    <><span className="sep">·</span>Fee from {money(row.fee_cents)}</>
+                  )}
+                  {row.deadline && (
+                    <><span className="sep">·</span>Deadline {row.deadline}</>
+                  )}
+                </p>
+                {rec.submittable ? (
+                  <Link
+                    className="btn btn-primary"
+                    to={`/submit?film=${film.id}&festival=${row.festival.id}`}
+                  >
+                    Send your film
+                  </Link>
+                ) : (
+                  <button className="btn btn-secondary" disabled>
+                    {row.open ? "No matching category" : "Not open yet"}
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="card">

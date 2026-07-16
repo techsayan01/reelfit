@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reelfit — Dark Studio redesign mockup</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css" />
+<style>
+  :root {
+    --ink: #0E0E10;        /* page canvas */
+    --panel: #151517;      /* sidebar / raised panel */
+    --tile: #18181B;       /* metric + row tiles */
+    --line: #26262B;       /* hairline border */
+    --swatch: #2A2A2E;     /* poster placeholder */
+    --paper: #F5F2EC;      /* primary text on dark */
+    --muted: #9A968E;      /* secondary text */
+    --dim: #7E7A72;        /* tertiary text */
+    --amber: #E8B23A;      /* single accent — Marquee Amber, brightened for dark */
+    --teal: #5DCAA5;       /* success / selected */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: #201d1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--paper);
+  }
+  .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0; }
+  .sub { color: #b8b2a6; font-size: 14px; margin: 4px 0 0; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 8px; }
+  .serif { font-family: Georgia, "Times New Roman", serif; }
+
+  /* ---- Current (light) panel ---- */
+  .cur { border: 1px solid #E7DFD2; border-radius: 12px; overflow: hidden; background: #FBF7F0; color: #1C1917; }
+  .cur .top { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid #E7DFD2; }
+  .cur .card { background: #fff; border: 1px solid #E7DFD2; border-radius: 10px; padding: 12px; }
+  .bar { height: 8px; background: #F1EEE9; border-radius: 4px; margin-bottom: 7px; }
+
+  /* ---- Proposed (dark) panel ---- */
+  .dark { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--ink); display: flex; min-height: 250px; }
+  .side { width: 168px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .nav { display: flex; align-items: center; gap: 9px; padding: 8px; color: var(--muted); font-size: 13px; border-radius: 7px; }
+  .nav.active { background: #232327; color: var(--paper); }
+  .main { flex: 1; padding: 16px; min-width: 0; }
+  .tile { background: var(--tile); border-radius: 9px; padding: 10px; }
+  .metric-num { font-size: 20px; color: var(--paper); }
+  .metric-lbl { font-size: 11px; color: var(--dim); }
+  .row { display: flex; gap: 10px; align-items: center; background: var(--tile); border-radius: 9px; padding: 9px 11px; margin-top: 8px; }
+  .poster { width: 34px; height: 46px; border-radius: 4px; background: var(--swatch); flex-shrink: 0; }
+  .chip-amber { font-size: 12px; color: var(--ink); background: var(--amber); padding: 4px 10px; border-radius: 6px; }
+
+  /* ---- palette + type reference ---- */
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .sw { width: 96px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); font-size: 11px; }
+  .sw .chip { height: 40px; }
+  .sw .cap { padding: 5px 7px; background: var(--panel); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div>
+    <h1>Reelfit — “Cinematic dark studio” redesign</h1>
+    <p class="sub">Before / after mockup + design tokens. Open in a browser. See <code>docs/REDESIGN.md</code> for the full plan.</p>
+  </div>
+
+  <!-- CURRENT -->
+  <div>
+    <p class="label" style="color:#8A5C12;">Current — reads like FilmFreeway</p>
+    <div class="cur">
+      <div class="top">
+        <span class="serif" style="font-size:16px;">Reelfit<span style="color:#B5791F;">.</span></span>
+        <span style="font-size:12px; color:#8A5C12;">Submissions</span>
+        <span style="font-size:12px; color:#6b675f;">Judging</span>
+        <span style="font-size:12px; color:#6b675f;">Tools</span>
+      </div>
+      <div style="padding:14px;">
+        <div class="serif" style="font-size:17px; margin-bottom:10px;">Hillside Film Festival</div>
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px;">
+          <div class="card"><div style="font-size:12px; color:#6b675f; margin-bottom:8px;">Submissions</div><div class="bar"></div><div class="bar" style="width:80%;"></div></div>
+          <div class="card"><div style="font-size:12px; color:#6b675f; margin-bottom:8px;">Tools</div><div class="bar"></div><div class="bar" style="width:60%;"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROPOSED -->
+  <div>
+    <p class="label" style="color:var(--amber);">Proposed — cinematic dark studio</p>
+    <div class="dark">
+      <div class="side">
+        <div style="display:flex; align-items:center; gap:8px; padding:4px 8px 12px;">
+          <span style="width:22px; height:22px; border-radius:6px; background:var(--amber); color:var(--ink); display:flex; align-items:center; justify-content:center;"><i class="ti ti-movie"></i></span>
+          <span style="font-size:14px;">Reelfit</span>
+        </div>
+        <div class="nav active"><i class="ti ti-inbox"></i> Submissions</div>
+        <div class="nav"><i class="ti ti-star"></i> Judging</div>
+        <div class="nav"><i class="ti ti-users"></i> Staff</div>
+        <div class="nav"><i class="ti ti-chart-bar"></i> Analytics</div>
+        <div class="nav"><i class="ti ti-adjustments"></i> Settings</div>
+      </div>
+      <div class="main">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <div>
+            <div style="font-size:16px;">Hillside Film Festival</div>
+            <div style="font-size:12px; color:var(--dim);">2026 season · validated scoring</div>
+          </div>
+          <span class="chip-amber">Review queue</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:6px;">
+          <div class="tile"><div class="metric-lbl">Submissions</div><div class="metric-num">2</div></div>
+          <div class="tile"><div class="metric-lbl">Undecided</div><div class="metric-num">1</div></div>
+          <div class="tile"><div class="metric-lbl">Fees</div><div class="metric-num">$122</div></div>
+        </div>
+        <div class="row">
+          <span class="poster"></span>
+          <div style="flex:1; min-width:0;"><div style="font-size:13px;">Glass Houses</div><div style="font-size:11px; color:var(--dim);">drama · 96 min · HIL1002</div></div>
+          <span style="font-size:11px; color:var(--amber);">In review</span>
+        </div>
+        <div class="row">
+          <span class="poster"></span>
+          <div style="flex:1; min-width:0;"><div style="font-size:13px;">Monsoon Letters</div><div style="font-size:11px; color:var(--dim);">documentary · 24 min · HIL1001</div></div>
+          <span style="font-size:11px; color:var(--teal);">Selected</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PALETTE -->
+  <div>
+    <p class="label" style="color:var(--muted);">Palette tokens</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#0E0E10;"></div><div class="cap">ink #0E0E10<br>page</div></div>
+      <div class="sw"><div class="chip" style="background:#151517;"></div><div class="cap">panel #151517</div></div>
+      <div class="sw"><div class="chip" style="background:#18181B;"></div><div class="cap">tile #18181B</div></div>
+      <div class="sw"><div class="chip" style="background:#26262B;"></div><div class="cap">line #26262B</div></div>
+      <div class="sw"><div class="chip" style="background:#F5F2EC;"></div><div class="cap">paper #F5F2EC<br>text</div></div>
+      <div class="sw"><div class="chip" style="background:#E8B23A;"></div><div class="cap">amber #E8B23A<br>accent</div></div>
+      <div class="sw"><div class="chip" style="background:#5DCAA5;"></div><div class="cap">teal #5DCAA5<br>selected</div></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -714,3 +714,203 @@ def test_credits_purchase(client):
     resp = client.post("/api/credits/buy", json={"pack": "trio"})
     assert resp.status_code == 200
     assert resp.json()["credit_balance"] == 4  # 1 welcome + 3
+
+
+def test_rank_festivals_orders_and_annotates():
+    """Pure ranking: submittable festivals outrank unavailable ones regardless
+    of fit score, and each match gets a plain-language reason."""
+    from app.modules.recommendations.service import rank_festivals
+
+    matches = rank_festivals([
+        {"festival_id": 1, "score": 90, "open": False, "eligible": True,
+         "days_to_deadline": None},                     # great fit, but closed
+        {"festival_id": 2, "score": 62, "open": True, "eligible": True,
+         "days_to_deadline": 5},                         # solid + closing soon
+        {"festival_id": 3, "score": 30, "open": True, "eligible": True,
+         "days_to_deadline": 40},                        # long shot
+        {"festival_id": 4, "score": 80, "open": True, "eligible": False,
+         "days_to_deadline": 10},                        # no category to enter
+    ])
+    order = [m.festival_id for m in matches]
+    # Submittable (2, 3) come first, best fit first; unavailable (1, 4) sink.
+    assert order[:2] == [2, 3]
+    assert set(order[2:]) == {1, 4}
+
+    by_id = {m.festival_id: m for m in matches}
+    assert by_id[2].tier == "solid" and by_id[2].closing_soon is True
+    assert "5 days" in by_id[2].reason
+    assert by_id[3].tier == "longshot" and by_id[3].closing_soon is False
+    assert by_id[1].submittable is False and "Not open" in by_id[1].reason
+    assert by_id[4].submittable is False and "No category" in by_id[4].reason
+
+
+def test_scores_carry_submission_recommendation(client):
+    _seed_festival()
+    _register_filmmaker(client)
+    resp = client.post("/api/films", json={
+        "title": "Monsoon Letters", "genre": "documentary",
+        "runtime_minutes": 24, "year": date.today().year - 1,
+    })
+    film_id = resp.json()["film"]["id"]
+    client.post(f"/api/films/{film_id}/score")
+
+    row = client.get(f"/api/films/{film_id}/scores").json()["scores"][0]
+    assert row["open"] is True
+    assert row["eligible"] is True
+    assert row["fee_cents"] == 3000  # Short Film category, regular tier
+    assert row["deadline"] is not None
+    rec = row["recommendation"]
+    assert rec["submittable"] is True
+    assert rec["tier"] in {"strong", "solid", "stretch", "longshot"}
+    assert isinstance(rec["reason"], str) and rec["reason"]
+
+
+def _make_owner_for_festival(client, festival_id, email="fowner@example.com"):
+    """Register an organizer and make them owner of an existing festival, then
+    leave them logged in."""
+    client.post("/api/auth/register", json={
+        "email": email, "password": "password123",
+        "display_name": "Owner", "kind": "organizer",
+    })
+    from app.db import SessionLocal
+    from app.modules.accounts.models import FestivalMembership, OrgRole, User
+    from sqlalchemy import select
+    db = SessionLocal()
+    user_id = db.scalar(select(User.id).where(User.email == email))
+    db.add(FestivalMembership(user_id=user_id, festival_id=festival_id, role=OrgRole.OWNER))
+    db.commit()
+    db.close()
+
+
+def test_filmmaker_public_profile(client):
+    fest_id = _seed_festival()
+    _register_filmmaker(client)
+    resp = client.post("/api/films", json={
+        "title": "Monsoon Letters", "genre": "documentary",
+        "runtime_minutes": 24, "year": date.today().year - 1,
+    })
+    film_id = resp.json()["film"]["id"]
+
+    # Project-page media should aggregate onto the public profile.
+    client.post(f"/api/films/{film_id}/photos", json={"url": "https://img/still.jpg", "caption": "On the river"})
+    client.post(f"/api/films/{film_id}/press", json={"title": "A quiet triumph", "outlet": "Sight & Sound"})
+
+    # Submit + get selected so a verified award appears on the profile.
+    category_id = client.get(
+        f"/api/submissions/options?film={film_id}&festival={fest_id}"
+    ).json()["categories"][0]["id"]
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": fest_id, "category_id": category_id,
+    }).json()["submission"]["id"]
+
+    # Edit profile details, claim handle, publish.
+    assert client.patch("/api/me/profile", json={
+        "title": "Writer/Director", "bio": "Documentary work from Bengal.",
+        "location": "Kolkata", "instagram": "@priya",
+    }).status_code == 200
+    assert client.put("/api/me/profile/handle", json={"handle": "priya-sharma"}).status_code == 200
+
+    # Not public yet → 404.
+    assert client.get("/api/filmmakers/priya-sharma").status_code == 404
+    assert client.put("/api/me/profile/publish", json={"is_public": True}).status_code == 200
+
+    # Mark the submission selected (festival owner action).
+    _make_owner_for_festival(client, fest_id)
+    client.post(f"/api/festival/submissions/{sub_id}/status", json={"status": "selected"})
+
+    prof = client.get("/api/filmmakers/priya-sharma")
+    assert prof.status_code == 200
+    data = prof.json()
+    assert data["display_name"] == "Priya"
+    assert data["title"] == "Writer/Director"
+    assert data["location"] == "Kolkata"
+    assert any(f["title"] == "Monsoon Letters" for f in data["filmography"])
+    assert data["summary"]["selections"] == 1
+    assert data["selections"][0]["achievement"] == "Official Selection"
+    # Project media aggregates onto the public profile.
+    assert data["photos"][0]["caption"] == "On the river"
+    assert data["photos"][0]["film_title"] == "Monsoon Letters"
+    assert data["press"][0]["outlet"] == "Sight & Sound"
+    # Email stays masked unless explicitly made public.
+    assert data["email"] is None
+
+    # The festival-side submission page links to the published public profile.
+    detail = client.get(f"/api/festival/submissions/{sub_id}").json()
+    assert detail["filmmaker"]["profile_handle"] == "priya-sharma"
+    assert detail["filmmaker"]["title"] == "Writer/Director"
+
+
+def test_profile_handle_uniqueness_and_validation(client):
+    _register_filmmaker(client, email="a@example.com")
+    assert client.put("/api/me/profile/handle", json={"handle": "taken"}).status_code == 200
+    # Bad format rejected.
+    assert client.put("/api/me/profile/handle", json={"handle": "no spaces!"}).status_code == 400
+
+    # A second filmmaker cannot claim the same handle.
+    client.post("/api/auth/logout")
+    _register_filmmaker(client, email="b@example.com")
+    resp = client.put("/api/me/profile/handle", json={"handle": "taken"})
+    assert resp.status_code == 400
+    assert "taken" in resp.json()["detail"].lower()
+
+
+def test_publish_requires_handle_and_filmmaker_only(client):
+    # Organizer has no filmmaker profile endpoints.
+    _make_owner(client, email="org2@example.com")
+    assert client.get("/api/me/profile").status_code == 403
+
+    client.post("/api/auth/logout")
+    _register_filmmaker(client, email="c@example.com")
+    # Cannot publish before choosing a handle.
+    assert client.put("/api/me/profile/publish", json={"is_public": True}).status_code == 400
+
+
+def test_film_project_media_on_submission_page(client):
+    fest_id = _seed_festival()
+    _register_filmmaker(client)
+    film_id = client.post("/api/films", json={
+        "title": "Media Film", "genre": "documentary",
+        "runtime_minutes": 20, "year": date.today().year,
+    }).json()["film"]["id"]
+
+    # Filmmaker builds out the project page.
+    assert client.post(f"/api/films/{film_id}/photos", json={"url": "https://img/1.jpg", "caption": "A still"}).status_code == 201
+    assert client.post(f"/api/films/{film_id}/links", json={"kind": "instagram", "url": "https://instagram.com/f"}).status_code == 201
+    assert client.post(f"/api/films/{film_id}/screenings", json={"festival_name": "Berlin", "award": "Best Doc", "happened_on": "2025"}).status_code == 201
+    assert client.post(f"/api/films/{film_id}/press", json={"title": "A rave review", "outlet": "Variety", "url": "https://v/1"}).status_code == 201
+
+    detail = client.get(f"/api/films/{film_id}").json()
+    assert len(detail["photos"]) == 1 and len(detail["links"]) == 1
+    assert len(detail["screenings"]) == 1 and len(detail["press"]) == 1
+
+    # Removal works and is scoped to the film.
+    link_id = detail["links"][0]["id"]
+    assert client.delete(f"/api/films/{film_id}/links/{link_id}").status_code == 200
+    assert len(client.get(f"/api/films/{film_id}").json()["links"]) == 0
+
+    # Submit + award so the Screenings & Awards tab shows a verified run.
+    sub_id = client.post("/api/submissions", json={
+        "film_id": film_id, "festival_id": fest_id, "category_id": 1,
+    }).json()["submission"]["id"]
+    _make_owner_for_festival(client, fest_id)
+    client.post(f"/api/festival/submissions/{sub_id}/status", json={"status": "award_winner"})
+
+    page = client.get(f"/api/festival/submissions/{sub_id}").json()
+    assert len(page["photos"]) == 1
+    assert page["press"][0]["outlet"] == "Variety"
+    assert page["screenings_run"]["external"][0]["award"] == "Best Doc"
+    assert page["screenings_run"]["verified"][0]["achievement"] == "Award Winner"
+
+
+def test_film_media_owner_isolation(client):
+    _seed_festival()
+    _register_filmmaker(client, email="owner1@example.com")
+    film_id = client.post("/api/films", json={
+        "title": "Mine", "genre": "documentary", "runtime_minutes": 20, "year": 2025,
+    }).json()["film"]["id"]
+
+    # A different filmmaker cannot read or edit someone else's film media.
+    client.post("/api/auth/logout")
+    _register_filmmaker(client, email="owner2@example.com")
+    assert client.get(f"/api/films/{film_id}").status_code == 404
+    assert client.post(f"/api/films/{film_id}/photos", json={"url": "https://x/1.jpg"}).status_code == 404

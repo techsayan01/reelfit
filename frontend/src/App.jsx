@@ -8,12 +8,15 @@ import Festivals from "./pages/Festivals.jsx";
 import FestivalDetail from "./pages/FestivalDetail.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import FilmNew from "./pages/FilmNew.jsx";
+import FilmEdit from "./pages/FilmEdit.jsx";
 import FilmScores from "./pages/FilmScores.jsx";
 import Submit from "./pages/Submit.jsx";
 import Credits from "./pages/Credits.jsx";
 import ReviewNew from "./pages/ReviewNew.jsx";
 import FestivalDashboard from "./pages/FestivalDashboard.jsx";
 import FestivalSubmissionDetail from "./pages/FestivalSubmissionDetail.jsx";
+import FilmmakerProfile from "./pages/FilmmakerProfile.jsx";
+import ProfileSettings from "./pages/ProfileSettings.jsx";
 import Help from "./pages/Help.jsx";
 
 function Protected({ kind, children }) {
@@ -34,8 +37,11 @@ export default function App() {
         <Route path="/help" element={<Help />} />
         <Route path="/festivals" element={<Festivals />} />
         <Route path="/festivals/:slug" element={<FestivalDetail />} />
+        <Route path="/f/:handle" element={<FilmmakerProfile />} />
         <Route path="/dashboard" element={<Protected kind="filmmaker"><Dashboard /></Protected>} />
+        <Route path="/profile" element={<Protected kind="filmmaker"><ProfileSettings /></Protected>} />
         <Route path="/films/new" element={<Protected kind="filmmaker"><FilmNew /></Protected>} />
+        <Route path="/films/:id/edit" element={<Protected kind="filmmaker"><FilmEdit /></Protected>} />
         <Route path="/films/:id/scores" element={<Protected kind="filmmaker"><FilmScores /></Protected>} />
         <Route path="/submit" element={<Protected kind="filmmaker"><Submit /></Protected>} />
         <Route path="/credits" element={<Protected kind="filmmaker"><Credits /></Protected>} />
